@@ -1,2 +1,12 @@
-// The engine moves here from `@lobechat/replica` once its API settles.
-export {};
+export * from './core/defineReplica';
+export * from './core/engine';
+export * from './core/entity';
+export * from './core/entityAdapters';
+export * from './core/keys';
+export * from './core/paging';
+export * from './core/reducer';
+export * from './core/settle';
+export * from './core/storedKeys';
+export type * from './core/types';
+export * from './core/writeQueue';
+export * from './storage';
