@@ -9,14 +9,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 
 import { testDriver } from '../../tests/testDriver';
-import { defineReplica } from '../core/defineReplica';
-import { REPLICA_INDEX_KEY } from '../core/engine';
-import { replicaKeys } from '../core/keys';
-import { createReplicaState } from '../core/reducer';
-import type { ReplicaRow, ReplicaScope, ReplicaState, ReplicaStorage } from '../core/types';
-import type { ReplicaEffects } from './createReplicaSlice';
-import { createReplicaSlice, recordLens, ReplicaScopeChangedError } from './createReplicaSlice';
+import { REPLICA_INDEX_KEY } from '../core/persistence/persistedRows';
+import { defineReplica } from '../core/resource/defineReplica';
+import { replicaKeys } from '../core/resource/queryKeys';
+import type { ReplicaScope } from '../core/resource/types';
+import { createReplicaState } from '../core/state/reducer';
+import type { ReplicaState } from '../core/state/types';
+import type { ReplicaRow, ReplicaStorage } from '../storage/types';
+import { createReplicaSlice } from './createReplicaSlice';
 import type { ReplicaSyncDriver } from './driver';
+import { ReplicaScopeChangedError } from './errors';
+import { recordLens } from './lens';
+import type { ReplicaEffects } from './types';
 
 type Value = string[] | null;
 

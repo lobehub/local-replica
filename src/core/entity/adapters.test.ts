@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { defineReplica } from './defineReplica';
-import { createReplicaEngine, type ReplicaStorePort } from './engine';
-import { linkReplicaEntity } from './entity';
-import { arrayEntity, singleEntity } from './entityAdapters';
-import { createReplicaState } from './reducer';
-import type { ReplicaState } from './types';
+import { createReplicaEngine } from '../engine/createReplicaEngine';
+import type { ReplicaStorePort } from '../engine/types';
+import { defineReplica } from '../resource/defineReplica';
+import { createReplicaState } from '../state/reducer';
+import type { ReplicaState } from '../state/types';
+import { arrayEntity, singleEntity } from './adapters';
+import { linkReplicaEntity } from './link';
 
 interface Row {
   id: string;

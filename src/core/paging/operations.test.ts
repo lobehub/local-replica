@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import { definePagedReplica } from './defineReplica';
+import { definePagedReplica } from '../resource/defineReplica';
 import {
   applyHeadPage,
   applyNextPage,
@@ -8,10 +8,9 @@ import {
   getNextPageCursor,
   insertHeadItems,
   mapPagedItem,
-  type ReplicaPagedData,
-  type ReplicaPagingConfig,
   toPersistedPage,
-} from './paging';
+} from './operations';
+import type { ReplicaPagedData, ReplicaPagingConfig } from './types';
 
 interface Row {
   id: string;

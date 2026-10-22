@@ -1,14 +1,12 @@
-import { replicaStorageKey } from './defineReplica';
-import type { ReplicaEntityAdapter, ReplicaOptimisticToken, ReplicaStorePort } from './engine';
-import {
-  hasPagedItem,
-  mapPagedItem,
-  type ReplicaPagedData,
-  type ReplicaPagingConfig,
-} from './paging';
-import { DROP_ROW, type ReplicaPersistedRows } from './persistedRows';
-import type { ReplicaEntityRemovalGuards } from './removalGuards';
-import type { ReplicaResource, ReplicaSource, ReplicaState } from './types';
+import type { ReplicaEntityRemovalGuards } from '../engine/removalGuards';
+import type { ReplicaOptimisticToken, ReplicaStorePort } from '../engine/types';
+import { hasPagedItem, mapPagedItem } from '../paging/operations';
+import type { ReplicaPagedData, ReplicaPagingConfig } from '../paging/types';
+import { DROP_ROW, type ReplicaPersistedRows } from '../persistence/persistedRows';
+import { replicaStorageKey } from '../resource/storageKey';
+import type { ReplicaResource } from '../resource/types';
+import type { ReplicaSource, ReplicaState } from '../state/types';
+import type { ReplicaEntityAdapter } from './types';
 
 export interface ReplicaEntityPropagationDeps<TData> {
   beginOptimistic: (key: string, apply: (data: TData) => TData) => ReplicaOptimisticToken<TData>;

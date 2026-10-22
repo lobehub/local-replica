@@ -5,11 +5,14 @@ import { vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 
 import { testDriver as driver } from '../../tests/testDriver';
-import { defineReplica } from '../core/defineReplica';
-import { REPLICA_INDEX_KEY } from '../core/engine';
-import { createReplicaState } from '../core/reducer';
-import type { ReplicaRow, ReplicaScope, ReplicaState, ReplicaStorage } from '../core/types';
-import { createReplicaSlice, recordLens } from './createReplicaSlice';
+import { REPLICA_INDEX_KEY } from '../core/persistence/persistedRows';
+import { defineReplica } from '../core/resource/defineReplica';
+import type { ReplicaScope } from '../core/resource/types';
+import { createReplicaState } from '../core/state/reducer';
+import type { ReplicaState } from '../core/state/types';
+import type { ReplicaRow, ReplicaStorage } from '../storage/types';
+import { createReplicaSlice } from './createReplicaSlice';
+import { recordLens } from './lens';
 
 export interface TestState {
   lists: Record<string, string[]>;

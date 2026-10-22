@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 
 import { testDriver as driver } from '../../tests/testDriver';
-import { definePagedReplica } from '../core/defineReplica';
-import type { ReplicaPagedData, ReplicaPageResult } from '../core/paging';
-import { createReplicaState } from '../core/reducer';
-import type { ReplicaScope, ReplicaState } from '../core/types';
-import { createReplicaSlice, recordLens } from './createReplicaSlice';
+import type { ReplicaPagedData, ReplicaPageResult } from '../core/paging/types';
+import { definePagedReplica } from '../core/resource/defineReplica';
+import type { ReplicaScope } from '../core/resource/types';
+import { createReplicaState } from '../core/state/reducer';
+import type { ReplicaState } from '../core/state/types';
+import { createReplicaSlice } from './createReplicaSlice';
+import { recordLens } from './lens';
 
 interface Row {
   id: string;

@@ -1,5 +1,5 @@
-import type { ReplicaRow, ReplicaRowKey, ReplicaStorage } from '../core/types';
 import { replicaRowStoreKey } from './keyValue';
+import type { ReplicaRow, ReplicaRowKey, ReplicaStorage } from './types';
 
 /** Turns a row into the string `localStorage` holds, and back. */
 export interface ReplicaRowCodec<T> {

@@ -5,11 +5,11 @@ import { act, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 
-import { defineReplica } from '../core/defineReplica';
-import { createReplicaState } from '../core/reducer';
-import { createReplicaSlice, recordLens } from './createReplicaSlice';
-import type { TestState } from './testUtils';
-import { createMemoryStorage, resetScopeState, scope, setup } from './testUtils';
+import { defineReplica } from '../core/resource/defineReplica';
+import { createReplicaState } from '../core/state/reducer';
+import { createReplicaSlice } from './createReplicaSlice';
+import { recordLens } from './lens';
+import { createMemoryStorage, resetScopeState, scope, setup, type TestState } from './testUtils';
 
 beforeEach(resetScopeState);
 

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ReplicaAction, ReplicaViewWrite } from './reducer';
-import { createReplicaState, replicaReducer } from './reducer';
+import {
+  createReplicaState,
+  type ReplicaAction,
+  replicaReducer,
+  type ReplicaViewWrite,
+} from './reducer';
 import type { ReplicaState } from './types';
 
 type List = string[];

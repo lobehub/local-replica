@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { staticReplicaScope } from './defineReplica';
-import { REPLICA_INDEX_KEY } from './engine';
+import type { ReplicaRow, ReplicaStorage } from '../../storage/types';
+import { staticReplicaScope } from '../resource/scope';
+import { REPLICA_INDEX_KEY } from './persistedRows';
 import { readReplicaStoredKeys } from './storedKeys';
-import type { ReplicaRow, ReplicaStorage } from './types';
 
 const memoryStorage = (rows: Record<string, ReplicaRow<any>>): ReplicaStorage<any> => ({
   get: async ({ queryKey, scope }) => rows[`${scope}/${queryKey}`],

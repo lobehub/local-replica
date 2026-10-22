@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { settleWithin } from './settle';
+import { settleWithin } from './settleWithin';
 
 afterEach(() => vi.useRealTimers());
 

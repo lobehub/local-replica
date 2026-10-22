@@ -1,134 +1,24 @@
-import isEqual from 'fast-deep-equal';
-
-import { replicaStorageKey, stableQueryKey } from './defineReplica';
-import { createEntityPropagation } from './entityPropagation';
+import { createEntityPropagation } from '../entity/propagation';
+import { createPersistedRows } from '../persistence/persistedRows';
+import { ReplicaWriteQueue } from '../persistence/writeQueue';
+import { replicaStorageKey } from '../resource/storageKey';
+import type { ReplicaResource } from '../resource/types';
 import {
-  applyHeadPage,
-  applyNextPage,
-  collapseToHead,
-  getNextPageCursor,
-  insertHeadItems,
-  joinPages,
-  pagingFor,
-  type ReplicaPagedData,
-  type ReplicaPageResult,
-  type ReplicaPagingContext,
-  toPersistedPage,
-} from './paging';
-import { createPersistedRows } from './persistedRows';
-import type { ReplicaAction, ReplicaEffect, ReplicaViewWrite } from './reducer';
-import { replicaReducer } from './reducer';
+  type ReplicaAction,
+  type ReplicaEffect,
+  replicaReducer,
+  type ReplicaViewWrite,
+} from '../state/reducer';
+import type { ReplicaSource, ReplicaState } from '../state/types';
+import { createPagination } from './pagination';
 import { createEntityRemovalGuards, createRemovalGuards } from './removalGuards';
-import type { ReplicaResource, ReplicaSource, ReplicaState } from './types';
-import { ReplicaWriteQueue } from './writeQueue';
-
-/** Reserved storage key of the per-scope index of persisted rows. */
-export { REPLICA_INDEX_KEY } from './persistedRows';
-
-/**
- * The engine's view of the host store. The engine never owns the rendered
- * value — the host does (a Zustand slice, a signal, a plain object) — it only
- * reads entries through `read` and hands every transition to `commit`.
- */
-export interface ReplicaStorePort<TData> {
-  /**
-   * Apply the view writes and the next bookkeeping slot as ONE host update, so
-   * subscribers never observe a view out of step with its bookkeeping.
-   */
-  commit: (writes: ReplicaViewWrite<TData>[], state: ReplicaState<TData>, label: string) => void;
-  /** Current bookkeeping slot. */
-  getState: () => ReplicaState<TData>;
-  /** Enumerate loaded keys (entity propagation). Defaults to the bookkeeping entries. */
-  keys?: () => string[];
-  /** Materialized value of one entry, as the UI sees it. */
-  read: (key: string) => TData | undefined;
-}
-
-/**
- * How entities (e.g. topics) appear inside a non-paged resource value. Paged
- * resources get this for free from `paging.getId`. Build one with
- * `singleEntity` (a detail value), `arrayEntity` (a plain list) or by hand for
- * nested shapes (grouped lists).
- */
-export interface ReplicaEntityAdapter<TData, TItem> {
-  /** Whether `data` holds the entity. */
-  has: (data: TData, id: string) => boolean;
-  /**
-   * Map the entity inside `data` (`fn` returning `undefined` deletes it).
-   * Return `data` itself when nothing changed, or `undefined` when the whole
-   * value goes away with the entity (a detail value).
-   */
-  map: (data: TData, id: string, fn: (item: TItem) => TItem | undefined) => TData | undefined;
-}
-
-export interface ReplicaEngineOptions<TParams, TData, TFetched> {
-  /** Label prefix of host updates (devtools action names). Defaults to the resource name. */
-  actionPrefix?: string;
-  /** Non-paged resources: how entities sit in the value (see `linkReplicaEntity`). */
-  entity?: ReplicaEntityAdapter<TData, any>;
-  /** Overrides `resource.fetcher` when the fetch needs store context. */
-  fetcher?: (params: TParams, cursor?: any) => Promise<TFetched>;
-  /** Paged: rows that only exist client-side (kept across refreshes, never persisted). */
-  isClientOnly?: (item: any) => boolean;
-  /** Reject a persisted value that cannot serve these params. Rarely needed: rows are stored per query. */
-  isHydratable?: (cached: TData, params: TParams) => boolean;
-  /**
-   * Non-paged: whether a head response means the entry no longer exists. Such a
-   * response is applied as an explicit removal (memory + persisted row) instead
-   * of through `merge` — otherwise a `null` would fall back to the confirmed
-   * value (the reducer resolves `action.data(confirmed) ?? confirmed`), so a
-   * deleted aggregate would be retained and re-persisted.
-   */
-  isMissing?: (incoming: TFetched) => boolean;
-  /**
-   * Non-paged: fold a server response into the confirmed value. Return
-   * `undefined` to keep the current value. Defaults to "the response is the value".
-   */
-  merge?: (incoming: TFetched, confirmed: TData | undefined, params: TParams) => TData | undefined;
-  /** Where the engine reads and commits the view. */
-  port: ReplicaStorePort<TData>;
-  /**
-   * Reconcile a server response with the value currently shown before it is
-   * folded in — e.g. keep a row the client knows is newer, or ignore a
-   * response that raced a newer local state. Return `undefined` to drop the
-   * response entirely.
-   */
-  prepareHead?: (
-    incoming: TFetched,
-    current: TData | undefined,
-    params: TParams,
-  ) => TFetched | undefined;
-  /** Re-run the network sync of one entry (or all); wired by the fetch adapter. */
-  revalidate?: (key?: string) => Promise<unknown>;
-  /**
-   * Strip transient / client-only parts before persisting.
-   *
-   * - a value → persisted
-   * - `undefined` → skip this write (keep whatever is already stored)
-   * - `null` → the entry is a server-confirmed absence: drop any prior
-   *   persisted projection, so a later hydrate cannot paint a value the server
-   *   no longer has (the view keeps the confirmed value).
-   */
-  toPersisted?: (data: TData) => TData | null | undefined;
-  /** Paged: domain fields derived from params, written with every head page. */
-  viewFields?: (params: TParams) => Partial<TData>;
-}
-
-/** What a head response did once folded in (see `applyHead`). */
-export type ReplicaHeadOutcome = 'dropped' | 'missing' | 'replaced';
-
-export interface OptimisticMutationOptions<TData, TResult> {
-  /** Turn the server result into the confirmed value; defaults to re-applying `apply`. */
-  confirm?: (result: TResult) => (data: TData) => TData;
-  /** Revalidate the entry after the server call settles. */
-  revalidate?: boolean;
-}
-
-/** Handle of an optimistic overlay that is settled later (see `beginOptimistic`). */
-export interface ReplicaOptimisticToken<TData> {
-  commit: (confirm?: (data: TData) => TData) => void;
-  rollback: () => void;
-}
+import { createScopeClear } from './scopeClear';
+import type {
+  OptimisticMutationOptions,
+  ReplicaEngineOptions,
+  ReplicaHeadOutcome,
+  ReplicaOptimisticToken,
+} from './types';
 
 /**
  * The replica engine: every transition of one resource, independent of any
@@ -146,8 +36,6 @@ export const createReplicaEngine = <TParams, TData, TFetched = TData>(
 ) => {
   const { port } = options;
   const paging = resource.paging;
-  const at = (key: string) => pagingFor(paging!, key);
-  const pagingCtx: ReplicaPagingContext<any> = { isClientOnly: options.isClientOnly };
   const prefix = options.actionPrefix ?? resource.name;
   const writeQueue = resource.storage ? new ReplicaWriteQueue<TData>(resource.storage) : undefined;
   const fetcher = options.fetcher ?? resource.fetcher;
@@ -160,29 +48,17 @@ export const createReplicaEngine = <TParams, TData, TFetched = TData>(
     createRemovalGuards();
   const entityGuards = createEntityRemovalGuards();
 
-  // ---- resource-wide clear ----------------------------------------------
-  /** Bumped by every `clear()` of a scope; reads started before it are stale. */
-  const clearGenerations = new Map<string, number>();
-  const clearGeneration = (scope: string) => clearGenerations.get(scope) ?? 0;
-  /**
-   * The persisted-row purge of the last `clear()` per scope: `true` once every
-   * row delete landed. A hydrate waits for it, and refuses to read while the
-   * purge failed (an untrusted scope, a storage error) so a wiped resource can
-   * never paint a row that survived it.
-   */
-  const scopePurges = new Map<string, Promise<boolean>>();
-
   const getSlot = port.getState;
   const storageKey = (key: string, query?: string) => ({
     queryKey: replicaStorageKey(key, query),
   });
 
   const toPersisted = (data: TData): TData | null | undefined => {
-    const paged = paging ? (toPersistedPage(data as any, paging, pagingCtx) as TData) : data;
+    const paged = pagination.toPersisted(data);
     return options.toPersisted ? options.toPersisted(paged) : paged;
   };
 
-  // ---- persisted rows (see `persistedRows.ts`) -----------------------------
+  // ---- persisted rows (see `persistence/persistedRows.ts`) -----------------
   const rows = createPersistedRows<TData>({
     commit: (keys, state) =>
       port.commit(
@@ -196,7 +72,16 @@ export const createReplicaEngine = <TParams, TData, TFetched = TData>(
     resource,
     writeQueue,
   });
-  const { deleteRows, readIndex, removeStoredVariants, retain, touchStorageKey } = rows;
+  const { deleteRows, removeStoredVariants, retain, touchStorageKey } = rows;
+
+  // ---- resource-wide clear (see `scopeClear.ts`) ---------------------------
+  const { clear, clearGeneration, clearScope, lastPurge } = createScopeClear<TData>({
+    port,
+    prefix,
+    resource,
+    rows,
+    writeQueue,
+  });
 
   const runEffects = (effects: ReplicaEffect<TData>[]) => {
     if (!writeQueue || effects.length === 0) return;
@@ -312,26 +197,6 @@ export const createReplicaEngine = <TParams, TData, TFetched = TData>(
     return entry?.pending.length ? entry.base : port.read(key);
   };
 
-  /**
-   * An overwrite hydrate repaints the entry from another query's persisted page.
-   * Client-only rows (an in-flight upload / create) have no server row yet, so
-   * that page cannot contain them — keep the ones still in the view, so a
-   * same-pool query change (a re-sort, a view-mode switch) never drops them.
-   * A cross-pool navigate is not "client-only" for the new params and is dropped.
-   */
-  const keepClientOnlyRows = (incoming: TData, current: TData | undefined, key: string): TData => {
-    if (!paging || !options.isClientOnly || !current) return incoming;
-    const page = incoming as unknown as ReplicaPagedData<unknown, unknown>;
-    const currentItems = (current as unknown as ReplicaPagedData<unknown, unknown>).items ?? [];
-    const incomingIds = new Set(page.items.map((item) => paging.getId(item)));
-    const survivors = currentItems.filter(
-      (item) => options.isClientOnly!(item) && !incomingIds.has(paging.getId(item)),
-    );
-    if (survivors.length === 0) return incoming;
-    const items = joinPages(survivors, page.items, at(key).direction);
-    return { ...(incoming as object), items } as TData;
-  };
-
   const hydrate = async (
     params: TParams,
     scope = resource.scope.get(),
@@ -365,7 +230,7 @@ export const createReplicaEngine = <TParams, TData, TFetched = TData>(
     // A read started before a `clear()` of this scope holds a wiped row.
     const generation = clearGeneration(scope);
     // After a `clear()`, read only once its row deletes landed.
-    const purge = scopePurges.get(scope);
+    const purge = lastPurge(scope);
     if (purge && !(await purge)) return false;
     const query = resource.query(params);
     const { queryKey } = storageKey(key, query);
@@ -381,7 +246,7 @@ export const createReplicaEngine = <TParams, TData, TFetched = TData>(
     // Entities deleted while the read was in flight may still be in the row.
     const stored = withoutRemovedEntities(scope, cached.data);
     if (stored === undefined) return false;
-    const data = overwrite ? keepClientOnlyRows(stored, port.read(key), key) : stored;
+    const data = overwrite ? pagination.keepClientOnlyRows(stored, port.read(key), key) : stored;
     const applied = dispatch({
       data,
       key,
@@ -397,37 +262,8 @@ export const createReplicaEngine = <TParams, TData, TFetched = TData>(
     return applied;
   };
 
-  const viewMatchesFields = (current: TData | undefined, params: TParams) => {
-    const fields = options.viewFields?.(params);
-    if (!current || !fields) return true;
-    // Falsy descriptors (undefined / false / null) are equivalent.
-    const norm = (value: unknown) => stableQueryKey(value || null);
-    return Object.entries(fields).every(
-      ([field, value]) => norm(value) === norm((current as Record<string, unknown>)[field]),
-    );
-  };
-
   /** Non-paged: whether a (prepared) head response is a terminal absence (`isMissing`). */
   const isMissingHead = (incoming: TFetched): boolean => !paging && !!options.isMissing?.(incoming);
-
-  const mergeHead = (
-    key: string,
-    incoming: TFetched,
-    confirmed: TData | undefined,
-    params: TParams,
-    reset: boolean,
-  ) => {
-    const page = incoming as unknown as ReplicaPageResult<unknown, unknown>;
-    const pageSize = (params as { pageSize?: number }).pageSize ?? page.items.length;
-    const merged = {
-      ...applyHeadPage(confirmed as any, page, { pageSize, reset }, at(key), pagingCtx),
-      ...options.viewFields?.(params),
-      isLoadingMore: loadingMore.has(key),
-    };
-    // Keep domain-only fields of the current view (e.g. transient flags).
-    const next = { ...(confirmed as object), ...merged } as TData;
-    return confirmed !== undefined && isEqual(next, confirmed) ? undefined : next;
-  };
 
   /**
    * Fold a head response in and report what it was: dropped by `prepareHead`,
@@ -460,11 +296,11 @@ export const createReplicaEngine = <TParams, TData, TFetched = TData>(
     // view seeded without bookkeeping is compared by its `viewFields`.
     const reset = entry
       ? entry.query !== query
-      : paging !== undefined && !viewMatchesFields(port.read(key), params);
+      : paging !== undefined && !pagination.viewMatchesFields(port.read(key), params);
     const applied = dispatch({
       data: (confirmed) =>
         paging
-          ? mergeHead(key, incoming, confirmed, params, reset)
+          ? pagination.mergeHead(key, incoming, confirmed, params, reset)
           : options.merge
             ? options.merge(incoming, confirmed, params)
             : (incoming as unknown as TData),
@@ -591,64 +427,6 @@ export const createReplicaEngine = <TParams, TData, TFetched = TData>(
     runEffects([{ data, key, query: getSlot().entries[key]?.query, scope, type: 'persist' }]);
   };
 
-  /**
-   * Wipe the resource in the active scope: every entry leaves memory in one
-   * host commit, every persisted row (all keys, all query variants) and the
-   * index are deleted, and reads already in flight are dropped — a hydrate
-   * started before the clear never dispatches, and `useSync` discards head
-   * responses whose request started before it. Requests started afterwards
-   * apply normally. Resolves `true` once the persisted rows are gone.
-   */
-  const clear = (): Promise<boolean> => {
-    const scope = resource.scope.get();
-    clearGenerations.set(scope, clearGeneration(scope) + 1);
-    port.commit([{ type: 'clear' }], { entries: {}, scope }, `${prefix}/clear`);
-    rows.forgetScope(scope);
-    const purge = purgeScope(scope);
-    scopePurges.set(scope, purge);
-    return purge;
-  };
-
-  /**
-   * `clear()` for any scope, including one that is not active (a user who
-   * switched away while their data was being deleted): every persisted row of
-   * `scope` and its index go, and for the active scope memory is wiped too
-   * (exactly `clear()`). An inactive scope's memory is not on screen and is
-   * left alone. The row deletes go through the write queue, so they land after
-   * any write this session already queued for that scope — a row (or index
-   * entry) written just before is purged rather than landing after the purge.
-   * A later hydrate of `scope` waits for the purge. Resolves `true` once the
-   * persisted rows are gone.
-   */
-  const clearScope = (scope: string): Promise<boolean> => {
-    if (scope === resource.scope.get()) return clear();
-    clearGenerations.set(scope, clearGeneration(scope) + 1);
-    const purge = purgeScope(scope);
-    scopePurges.set(scope, purge);
-    return purge;
-  };
-
-  /** Delete every persisted row of `scope` (see `clear`). */
-  const purgeScope = async (scope: string): Promise<boolean> => {
-    if (!writeQueue) return true;
-    // Until identity resolves the scope is a guess; never write into it.
-    if (!resource.scope.canPersist()) return false;
-    // Rows this session knows about are queued now, ahead of any later write.
-    const queued = deleteRows(scope, [...(rows.indexedKeys(scope) ?? [])]);
-    let persisted: string[];
-    try {
-      persisted = await readIndex(scope);
-    } catch {
-      return false;
-    }
-    // Keys this session tracks are already queued above, or were written by a
-    // newer response since the clear (their row is fresh): skip both.
-    const known = rows.indexedKeys(scope);
-    const stale = persisted.filter((queryKey) => !known?.has(queryKey));
-    const [first, rest] = await Promise.all([queued, deleteRows(scope, stale)]);
-    return first && rest;
-  };
-
   const revalidate = (key?: string): Promise<unknown> =>
     options.revalidate ? options.revalidate(key) : Promise.resolve();
 
@@ -709,77 +487,19 @@ export const createReplicaEngine = <TParams, TData, TFetched = TData>(
     }
   };
 
-  // ---- pagination --------------------------------------------------------
+  // ---- pagination (see `pagination.ts`) -----------------------------------
+  const pagination = createPagination<TParams, TData, TFetched>({
+    fetcher,
+    getSlot,
+    loadingMore,
+    options,
+    port,
+    resource,
+    update,
+  });
+  const { collapse, insertHead, loadMore } = pagination;
 
-  /**
-   * Fetch and merge the next page with the params of the loaded head page
-   * (`fallbackParams` covers views seeded outside `useSync`). In `cursor` mode
-   * paging only starts from a server-confirmed head page: a hydrated cursor
-   * may be stale. A result is dropped when the scope, the query or the loaded
-   * depth changed while it was in flight.
-   */
-  const loadMore = async (key: string, fallbackParams?: TParams): Promise<void> => {
-    if (!paging || !fetcher) return;
-    const entry = getSlot().entries[key];
-    const current = port.read(key) as ReplicaPagedData<unknown, unknown> | undefined;
-    if (!current || loadingMore.has(key)) return;
-    if (paging.mode === 'cursor' && entry?.source === 'storage') return;
-    const params = (entry?.params ?? fallbackParams) as TParams | undefined;
-    if (params === undefined) return;
-    const cursor = getNextPageCursor(current, at(key));
-    if (cursor === null || cursor === undefined) return;
-
-    const query = entry?.query;
-    const scope = resource.scope.get();
-    const depth = current.currentPage;
-    const setLoading = (patch: object) =>
-      update(key, (data) => data && ({ ...data, ...patch } as TData), { persist: false });
-
-    loadingMore.add(key);
-    setLoading({ isLoadingMore: true, loadMoreError: undefined });
-    const isCurrent = () => {
-      const latest = port.read(key) as ReplicaPagedData<unknown, unknown> | undefined;
-      return (
-        resource.scope.get() === scope &&
-        getSlot().entries[key]?.query === query &&
-        latest?.currentPage === depth
-      );
-    };
-    try {
-      const page = (await fetcher(params, cursor)) as unknown as ReplicaPageResult<
-        unknown,
-        unknown
-      >;
-      if (!isCurrent()) return void setLoading({ isLoadingMore: false });
-      update(
-        key,
-        (data) => data && (applyNextPage(data as any, page, at(key), pagingCtx) as TData),
-        { persist: (paging.persist?.pages ?? 1) > 1 },
-      );
-    } catch (error) {
-      setLoading({ isLoadingMore: false, loadMoreError: isCurrent() ? error : undefined });
-    } finally {
-      loadingMore.delete(key);
-    }
-  };
-
-  /** Insert rows at the head (new / streamed items). */
-  const insertHead = <TItem>(key: string, items: TItem[], { persist = false } = {}) =>
-    paging
-      ? update(key, (data) => data && (insertHeadItems(data as any, items, at(key)) as TData), {
-          persist,
-        })
-      : false;
-
-  /** Drop loaded pages, keeping the head (e.g. after an edit inside older pages). */
-  const collapse = (key: string) =>
-    paging
-      ? update(key, (data) => data && (collapseToHead(data as any, at(key)) as TData), {
-          persist: false,
-        })
-      : false;
-
-  // ---- entity propagation (see `entityPropagation.ts`) ---------------------
+  // ---- entity propagation (see `entity/propagation.ts`) --------------------
   const entities = createEntityPropagation<TData>({
     beginOptimistic,
     entity: options.entity,

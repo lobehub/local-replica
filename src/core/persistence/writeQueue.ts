@@ -1,4 +1,4 @@
-import type { ReplicaRow, ReplicaRowKey, ReplicaStorage } from './types';
+import type { ReplicaRow, ReplicaRowKey, ReplicaStorage } from '../../storage/types';
 
 /**
  * Strict read of one row (see `ReplicaStorage.getStrict`). Rejects when the
