@@ -1,6 +1,6 @@
 {
   "name": "local-replica",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Local-first replicas: paint the last known state on the first frame, reconcile with the server in the background",
   "keywords": [
     "local-first",
