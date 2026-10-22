@@ -31,6 +31,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  id-token: write # Required for npm trusted publishing (OIDC)
   contents: write # Required for semantic-release to push tags and commits
   issues: write # Required for semantic-release to create issues
   pull-requests: write # Required for semantic-release to comment on PRs
@@ -41,15 +42,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/create-github-app-token@v2
-        id: app-token
-        with:
-          app-id: ${{ vars.LOBEHUB_BOT_APP_ID }}
-          private-key: ${{ secrets.LOBEHUB_BOT_APP_PRIVATE_KEY }}
-
+      # `main` is unprotected, so the job's own token can push the release commit
+      # and tags. (`LOBEHUB_BOT_APP_ID` is a lobehub/lobehub repo variable, not
+      # an org one, so the bot app token cannot be minted here.)
       - uses: actions/checkout@v5
         with:
-          token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
           ref: ${{ github.ref_name }}
 
@@ -86,5 +83,8 @@ jobs:
       - name: Release
         run: bun run release
         env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          # The release commit must not run the commitlint hook.
+          HUSKY: 0
+          # No NPM_TOKEN: @semantic-release/npm publishes through npm trusted
+          # publishing (OIDC). The org token's account does not own `local-replica`.
