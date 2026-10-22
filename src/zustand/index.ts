@@ -1,2 +1,2 @@
-// The Zustand adapter moves here from `@lobechat/replica/zustand` once its API settles.
-export {};
+export * from './createReplicaSlice';
+export * from './driver';
