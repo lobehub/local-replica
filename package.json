@@ -1,0 +1,80 @@
+{
+  "name": "local-replica",
+  "version": "0.0.0",
+  "description": "Local-first replicas: paint the last known state on the first frame, reconcile with the server in the background",
+  "keywords": [
+    "local-first",
+    "replica",
+    "cache",
+    "offline",
+    "optimistic",
+    "indexeddb",
+    "zustand",
+    "swr"
+  ],
+  "homepage": "https://github.com/lobehub/local-replica",
+  "bugs": {
+    "url": "https://github.com/lobehub/local-replica/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lobehub/local-replica.git"
+  },
+  "license": "MIT",
+  "author": "LobeHub <i@lobehub.com>",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./zustand": {
+      "types": "./dist/zustand/index.d.ts",
+      "default": "./dist/zustand/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "prepublishOnly": "bun run build",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fast-deep-equal": "^3.1.3"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^19.3.0",
+    "happy-dom": "^21.0.4",
+    "react": "^19.3.1",
+    "swr": "^2.5.1",
+    "tsdown": "^0.23.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5",
+    "zustand": "^5.0.16"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "zustand": ">=4"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "zustand": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}
