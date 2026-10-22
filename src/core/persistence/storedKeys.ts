@@ -1,5 +1,5 @@
-import { REPLICA_INDEX_KEY } from './engine';
-import type { ReplicaResource } from './types';
+import type { ReplicaResource } from '../resource/types';
+import { REPLICA_INDEX_KEY } from './persistedRows';
 
 /**
  * The entry storage keys this resource has a persisted row for in the active

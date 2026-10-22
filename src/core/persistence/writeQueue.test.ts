@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ReplicaStorage } from './types';
+import type { ReplicaStorage } from '../../storage/types';
 import { ReplicaWriteQueue } from './writeQueue';
 
 describe('ReplicaWriteQueue', () => {

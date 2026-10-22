@@ -1,4 +1,4 @@
-import type { ReplicaEntityAdapter } from './engine';
+import type { ReplicaEntityAdapter } from './types';
 
 /**
  * The value IS one entity, or wraps one (`{ project, members }`). Deleting the

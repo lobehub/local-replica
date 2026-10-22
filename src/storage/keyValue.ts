@@ -1,4 +1,4 @@
-import type { ReplicaRow, ReplicaRowKey, ReplicaStorage } from '../core/types';
+import type { ReplicaRow, ReplicaRowKey, ReplicaStorage } from './types';
 
 /**
  * An async key-value store a replica can persist into: an IndexedDB object

@@ -2,13 +2,18 @@ import { renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 
-import { testDriver } from '../../tests/testDriver';
-import { createReplicaSlice, recordLens } from '../zustand/createReplicaSlice';
-import { defineReplica } from './defineReplica';
-import { createReplicaEngine, REPLICA_INDEX_KEY, type ReplicaStorePort } from './engine';
-import { arrayEntity } from './entityAdapters';
-import { createReplicaState } from './reducer';
-import type { ReplicaRow, ReplicaScope, ReplicaState, ReplicaStorage } from './types';
+import { testDriver } from '../../../tests/testDriver';
+import type { ReplicaRow, ReplicaStorage } from '../../storage/types';
+import { createReplicaSlice } from '../../zustand/createReplicaSlice';
+import { recordLens } from '../../zustand/lens';
+import { arrayEntity } from '../entity/adapters';
+import { REPLICA_INDEX_KEY } from '../persistence/persistedRows';
+import { defineReplica } from '../resource/defineReplica';
+import type { ReplicaScope } from '../resource/types';
+import { createReplicaState } from '../state/reducer';
+import type { ReplicaState } from '../state/types';
+import { createReplicaEngine } from './createReplicaEngine';
+import type { ReplicaStorePort } from './types';
 
 interface Item {
   id: string;

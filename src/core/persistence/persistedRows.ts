@@ -1,7 +1,8 @@
 import isEqual from 'fast-deep-equal';
 
-import { isReplicaStorageKeyOf, replicaStorageKey } from './defineReplica';
-import type { ReplicaResource, ReplicaState } from './types';
+import { isReplicaStorageKeyOf, replicaStorageKey } from '../resource/storageKey';
+import type { ReplicaResource } from '../resource/types';
+import type { ReplicaState } from '../state/types';
 import { readReplicaRowStrict, type ReplicaWriteQueue } from './writeQueue';
 
 /** Reserved storage key of the per-scope index of persisted rows. */
@@ -143,12 +144,15 @@ export const createPersistedRows = <TData>({
     return rows;
   };
 
-  /** A row on screen, or whose entry has writes / a page load in flight. */
+  /**
+   * A row on screen, or whose entry has writes / a page load in flight.
+   * `entryKey` comes from `loadedRows`, so its entry is in the slot.
+   */
   const isPinned = (queryKey: string, entryKey: string | undefined) =>
     retainedRows.has(queryKey) ||
     (entryKey !== undefined &&
       (retainedKeys.has(entryKey) ||
-        (getSlot().entries[entryKey]?.pending.length ?? 0) > 0 ||
+        getSlot().entries[entryKey].pending.length > 0 ||
         loadingMore.has(entryKey)));
 
   /** The oldest unpinned rows past the cap (`keys` is oldest first). */
@@ -229,16 +233,15 @@ export const createPersistedRows = <TData>({
       });
   };
 
-  /** Record a persisted row in the index (queued after the row write). */
+  /** Record a persisted row in the index (queued after the row write; see `writeRow`). */
   const trackStorageKey = (scope: string, queryKey: string) => {
-    if (!writeQueue) return;
     noteWrite(scope, queryKey);
     if (maxEntries !== undefined) return touchStorageKey(scope, queryKey);
     const known = indexed.get(scope) ?? new Set<string>();
     indexed.set(scope, known);
     if (known.has(queryKey)) return;
     known.add(queryKey);
-    void writeQueue
+    void writeQueue!
       .update(
         indexKey(scope),
         (current) => {

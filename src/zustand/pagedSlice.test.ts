@@ -2,14 +2,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 
 import { testDriver as driver } from '../../tests/testDriver';
-import { definePagedReplica, defineReplica } from '../core/defineReplica';
-import { REPLICA_INDEX_KEY } from '../core/engine';
-import { linkReplicaEntity } from '../core/entity';
-import { singleEntity } from '../core/entityAdapters';
-import type { ReplicaPagedData, ReplicaPageResult } from '../core/paging';
-import { createReplicaState } from '../core/reducer';
-import type { ReplicaRow, ReplicaScope, ReplicaState, ReplicaStorage } from '../core/types';
-import { createReplicaSlice, recordLens } from './createReplicaSlice';
+import { singleEntity } from '../core/entity/adapters';
+import { linkReplicaEntity } from '../core/entity/link';
+import type { ReplicaPagedData, ReplicaPageResult } from '../core/paging/types';
+import { REPLICA_INDEX_KEY } from '../core/persistence/persistedRows';
+import { definePagedReplica, defineReplica } from '../core/resource/defineReplica';
+import type { ReplicaScope } from '../core/resource/types';
+import { createReplicaState } from '../core/state/reducer';
+import type { ReplicaState } from '../core/state/types';
+import type { ReplicaRow, ReplicaStorage } from '../storage/types';
+import { createReplicaSlice } from './createReplicaSlice';
+import { recordLens } from './lens';
 
 interface Row {
   id: string;

@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 
 import { testDriver as driver } from '../../tests/testDriver';
-import { definePagedReplica } from '../core/defineReplica';
-import type { ReplicaPagedData } from '../core/paging';
-import { createReplicaState } from '../core/reducer';
-import type { ReplicaRow, ReplicaScope, ReplicaState, ReplicaStorage } from '../core/types';
-import { createReplicaSlice, splitPagedLens } from './createReplicaSlice';
+import type { ReplicaPagedData } from '../core/paging/types';
+import { definePagedReplica } from '../core/resource/defineReplica';
+import type { ReplicaScope } from '../core/resource/types';
+import { createReplicaState } from '../core/state/reducer';
+import type { ReplicaState } from '../core/state/types';
+import type { ReplicaRow, ReplicaStorage } from '../storage/types';
+import { createReplicaSlice } from './createReplicaSlice';
+import { splitPagedLens } from './lens';
 
 /**
  * A transcript-shaped host: raw rows in `rowsMap` (what existing readers use),

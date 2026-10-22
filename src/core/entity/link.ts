@@ -1,4 +1,4 @@
-import type { ReplicaOptimisticToken } from './engine';
+import type { ReplicaOptimisticToken } from '../engine/types';
 
 /** The part of a slice entity propagation needs (structural, so any slice fits). */
 export interface ReplicaEntityTarget {

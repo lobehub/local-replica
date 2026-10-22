@@ -6,13 +6,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 
 import { testDriver as driver } from '../../tests/testDriver';
-import { defineReplica } from '../core/defineReplica';
-import { singleEntity } from '../core/entityAdapters';
-import { createReplicaState } from '../core/reducer';
-import type { ReplicaState } from '../core/types';
-import { createReplicaSlice, recordLens } from './createReplicaSlice';
-import type { TestState } from './testUtils';
-import { resetScopeState, scope, scopeState } from './testUtils';
+import { singleEntity } from '../core/entity/adapters';
+import { defineReplica } from '../core/resource/defineReplica';
+import { createReplicaState } from '../core/state/reducer';
+import type { ReplicaState } from '../core/state/types';
+import { createReplicaSlice } from './createReplicaSlice';
+import { recordLens } from './lens';
+import { resetScopeState, scope, scopeState, type TestState } from './testUtils';
 
 beforeEach(resetScopeState);
 
