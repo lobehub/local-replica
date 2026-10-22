@@ -2,6 +2,13 @@
 
 # Changelog
 
+## [0.0.2](https://github.com/lobehub/local-replica/compare/v0.0.1...v0.0.2) (2026-10-22)
+
+
+### ♻ Code Refactoring
+
+* Organize src into domain modules and reach 100% test coverage, closes [#4](https://github.com/lobehub/local-replica/issues/4) ([3aefe5e](https://github.com/lobehub/local-replica/commit/3aefe5e))
+
 ## [0.0.1](https://github.com/lobehub/local-replica/compare/v0.0.0...v0.0.1) (2026-10-22)
 
 
