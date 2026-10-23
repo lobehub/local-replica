@@ -2,6 +2,13 @@
 
 # Changelog
 
+## [0.0.3](https://github.com/lobehub/local-replica/compare/v0.0.2...v0.0.3) (2026-10-23)
+
+
+### 🎫 Chores
+
+* **release**: Force patch release ([8316914](https://github.com/lobehub/local-replica/commit/8316914))
+
 ## [0.0.2](https://github.com/lobehub/local-replica/compare/v0.0.1...v0.0.2) (2026-10-22)
 
 
