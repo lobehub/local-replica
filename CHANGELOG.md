@@ -2,6 +2,13 @@
 
 # Changelog
 
+## [0.0.4](https://github.com/lobehub/local-replica/compare/v0.0.3...v0.0.4) (2026-10-25)
+
+
+### 🐛 Bug Fixes
+
+* **zustand**: Add an onSettled effect that runs for every successful response, closes [#5](https://github.com/lobehub/local-replica/issues/5) [lobehub/lobehub#21083](https://github.com/lobehub/lobehub/issues/21083) ([892db94](https://github.com/lobehub/local-replica/commit/892db94))
+
 ## [0.0.3](https://github.com/lobehub/local-replica/compare/v0.0.2...v0.0.3) (2026-10-23)
 
 
