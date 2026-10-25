@@ -26,19 +26,19 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "types": "./es/index.d.ts",
+      "default": "./es/index.js"
     },
     "./zustand": {
-      "types": "./dist/zustand/index.d.ts",
-      "default": "./dist/zustand/index.js"
+      "types": "./es/zustand/index.d.ts",
+      "default": "./es/zustand/index.js"
     },
     "./package.json": "./package.json"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./es/index.js",
+  "types": "./es/index.d.ts",
   "files": [
-    "dist"
+    "es"
   ],
   "scripts": {
     "build": "tsdown",
@@ -59,6 +59,7 @@
     "@lobehub/commitlint-config": "^2.1.7",
     "@lobehub/docs-kit": "^6.3.1",
     "@lobehub/semantic-release-config": "^2.1.7",
+    "@lobehub/ui": "^6.9.0",
     "@react-router/dev": "^8.5.0",
     "@testing-library/react": "^16.3.3",
     "@types/react": "^19.3.0",
@@ -66,6 +67,7 @@
     "conventional-changelog-gitmoji-config": "^1.5.2",
     "happy-dom": "^21.0.4",
     "husky": "^9.1.7",
+    "lucide-react": "^1.61.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router": "^8.5.0",
