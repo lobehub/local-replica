@@ -33,6 +33,15 @@ Linear gets there with a purpose-built sync engine. Getting the same experience 
 | **Conflicts and debugging**       | The truth is spread over the client, the sync layer and the server, so a wrong value is hard to trace back.                                                     |
 | **Lock-in**                       | Your data layer is bound to one engine, often one database. Moving off it is expensive.                                                                         |
 
+To see what this takes in practice, read [Reverse Engineering Linear's Sync Engine](https://github.com/wzhudev/reverse-linear-sync-engine). Its author reconstructed Linear Sync Engine (LSE) from Linear's shipped (minified) frontend code, annotated it, and checked the result against Linear's public talks. Linear's CTO later called it more complete than Linear's own internal docs. What it uncovers:
+
+- **Models are a client-side ORM.** About 80 models are declared with decorators into a `ModelRegistry`, with load strategies (`instant`, `lazy`, `partial`, …), references and back-references. MobX makes them observable, and they live in an in-memory object pool.
+- **The client runs a database.** Bootstrapping fills one IndexedDB database per workspace (full, partial or local bootstrap). A hash of all model metadata decides when that database must be migrated, and data is hydrated lazily from it.
+- **Writes are transactions, not API calls.** `issue.title = '…'; issue.save()` produces a transaction. It is queued and cached in IndexedDB, sent in batches, and can be undone if the server rejects it.
+- **The server is a sequencer.** It executes every transaction under one global, increasing `syncId` and broadcasts delta packets over a WebSocket to every client, including the one that sent it. Access control is expressed as sync groups the client subscribes to.
+
+The resulting developer experience is excellent, but only because a frontend runtime, a client database with migrations, a transaction protocol and a server-side sequencer are all built to match.
+
 For a product designed around a sync engine from day one, like Linear, that is a sound investment. For most apps, which already have server APIs, a fetch layer and a store, it means starting the data layer over for the sake of UX, and then writing every new feature inside that mental model.
 
 ### Most of the perceived speed doesn't need a sync engine
