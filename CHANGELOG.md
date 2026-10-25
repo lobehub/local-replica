@@ -2,6 +2,18 @@
 
 # Changelog
 
+## [0.0.5](https://github.com/lobehub/local-replica/compare/v0.0.4...v0.0.5) (2026-10-25)
+
+
+### ♻ Code Refactoring
+
+* **docs**: Move the docs site to the repository root, closes [#8](https://github.com/lobehub/local-replica/issues/8) ([3dd96e4](https://github.com/lobehub/local-replica/commit/3dd96e4))
+
+
+### 📝 Documentation
+
+* Retell README around local-first feel without a sync engine, closes [#6](https://github.com/lobehub/local-replica/issues/6) [#7](https://github.com/lobehub/local-replica/issues/7) ([be45ee2](https://github.com/lobehub/local-replica/commit/be45ee2))
+
 ## [0.0.4](https://github.com/lobehub/local-replica/compare/v0.0.3...v0.0.4) (2026-10-25)
 
 
