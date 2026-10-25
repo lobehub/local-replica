@@ -59,9 +59,10 @@ export interface ReplicaSettleContext {
  * every response the resource settles, whichever path requested it — so a
  * store that fetches while no view is mounted keeps the same side effects.
  *
- * They run only for a response that passed every guard (clear, removal, active
- * query, a newer response already applied) and, for `onApplied` / `onMissing`,
- * only when its captured scope is still the active one.
+ * Except `onSettled`, they run only for a response that passed every guard
+ * (clear, removal, active query, a newer response already applied) and, for
+ * `onApplied` / `onMissing`, only when its captured scope is still the active
+ * one.
  */
 export interface ReplicaEffects<TParams, TFetched> {
   /**
@@ -87,6 +88,14 @@ export interface ReplicaEffects<TParams, TFetched> {
    * keep of it there (a linked list row). Never touch the view on screen.
    */
   onPurge?: (params: TParams, context: ReplicaSettleContext) => void;
+  /**
+   * Every successful response, including one the guards discard (cleared or
+   * removed entry, superseded query, off-scope) and one `prepareHead` drops.
+   * Use it for per-request bookkeeping that must be released even when the
+   * response is never folded. Runs before the other effects of the response;
+   * not called for errors.
+   */
+  onSettled?: (data: TFetched, params: TParams, context: ReplicaSettleContext) => void;
 }
 
 export interface ReplicaFetchOptions {

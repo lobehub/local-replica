@@ -72,11 +72,13 @@ const setup = ({
   driver = testDriver,
   effects,
   fetcher = vi.fn(async () => ['server'] as Value),
+  prepareHead,
   storage = createMemoryStorage(),
 }: {
   driver?: ReplicaSyncDriver;
   effects?: ReplicaEffects<{ id: string }, Value>;
   fetcher?: (params: { id: string }) => Promise<Value>;
+  prepareHead?: (incoming: Value, current: Value | undefined) => Value | undefined;
   storage?: ReturnType<typeof createMemoryStorage>;
 } = {}) => {
   const resource = defineReplica<{ id: string }, Value>({
@@ -97,6 +99,7 @@ const setup = ({
     get: store.getState,
     // `null` is the server's "this entry does not exist".
     isMissing: (data) => data === null,
+    prepareHead,
     set: (partial) => store.setState(partial),
     stateKey: 'listsReplica',
     view: recordLens('lists'),
@@ -112,6 +115,7 @@ const effectSpies = () => ({
   onError: vi.fn(),
   onMissing: vi.fn(),
   onPurge: vi.fn(),
+  onSettled: vi.fn(),
 });
 
 beforeEach(() => {
@@ -162,6 +166,23 @@ describe('createReplicaSlice fetch', () => {
     await expect(pending).resolves.toMatchObject({ applied: false });
     expect(store.getState().lists.a).toBeUndefined();
     expect(effects.onApplied).not.toHaveBeenCalled();
+  });
+
+  it('settles a discarded response so per-request bookkeeping can be released', async () => {
+    const { calls, fetcher } = deferredFetcher();
+    const effects = effectSpies();
+    const { slice } = setup({ effects, fetcher });
+
+    const pending = slice.fetch({ id: 'a' });
+    slice.remove('a');
+    calls[0].resolve(['deleted on the server']);
+
+    await expect(pending).resolves.toMatchObject({ applied: false });
+    expect(effects.onSettled).toHaveBeenCalledWith(
+      ['deleted on the server'],
+      { id: 'a' },
+      { key: 'a', scope: 'user-1:personal', source: 'fetch' },
+    );
   });
 
   it('drops a response whose request started before a clear()', async () => {
@@ -454,5 +475,135 @@ describe('createReplicaSlice fetch', () => {
 
     await expect(slice.fetch({ id: 'a' })).resolves.toMatchObject({ applied: true });
     expect(store.getState().lists.a).toEqual(['server']);
+  });
+
+  describe('onSettled', () => {
+    const settledWith = (data: Value, id = 'a', source = 'fetch', scope = 'user-1:personal') => [
+      data,
+      { id },
+      { key: id, scope, source },
+    ];
+
+    it('runs once for an applied response, before onApplied', async () => {
+      const effects = effectSpies();
+      const { slice } = setup({ effects });
+
+      await slice.fetch({ id: 'a' });
+
+      expect(effects.onSettled).toHaveBeenCalledTimes(1);
+      expect(effects.onSettled).toHaveBeenCalledWith(...settledWith(['server']));
+      expect(effects.onSettled.mock.invocationCallOrder[0]).toBeLessThan(
+        effects.onApplied.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('runs for a response prepareHead drops, which applies nothing', async () => {
+      const effects = effectSpies();
+      const { slice, store } = setup({ effects, prepareHead: () => undefined });
+
+      await expect(slice.fetch({ id: 'a' })).resolves.toMatchObject({ applied: false });
+
+      expect(store.getState().lists.a).toBeUndefined();
+      expect(effects.onApplied).not.toHaveBeenCalled();
+      expect(effects.onSettled).toHaveBeenCalledWith(...settledWith(['server']));
+    });
+
+    it('runs for a response captured under a scope the store has left', async () => {
+      const { calls, fetcher } = deferredFetcher();
+      const effects = effectSpies();
+      const { slice } = setup({ effects, fetcher });
+
+      const pending = slice.fetch({ id: 'a' });
+      scopeState.current = 'user-2:personal';
+      calls[0].resolve(['previous identity']);
+
+      await expect(pending).resolves.toMatchObject({ applied: false });
+      expect(effects.onSettled).toHaveBeenCalledWith(...settledWith(['previous identity']));
+    });
+
+    it('runs for a response superseded by a fresh fetch', async () => {
+      const { calls, fetcher } = deferredFetcher();
+      const effects = effectSpies();
+      const { slice, store } = setup({ effects, fetcher });
+
+      const stale = slice.fetch({ id: 'a' });
+      const fresh = slice.fetch({ id: 'a' }, { fresh: true });
+      calls[1].resolve(['fresh']);
+      await fresh;
+      calls[0].resolve(['stale']);
+
+      await expect(stale).resolves.toMatchObject({ applied: false });
+      expect(store.getState().lists.a).toEqual(['fresh']);
+      expect(effects.onSettled).toHaveBeenCalledTimes(2);
+      expect(effects.onSettled).toHaveBeenLastCalledWith(...settledWith(['stale']));
+    });
+
+    it('runs for a terminal absence, applied or purged off-scope', async () => {
+      const { calls, fetcher } = deferredFetcher();
+      const effects = effectSpies();
+      const { slice } = setup({ effects, fetcher });
+
+      const active = slice.fetch({ id: 'a' });
+      calls[0].resolve(null);
+      await expect(active).resolves.toMatchObject({ applied: true, missing: true });
+      expect(effects.onSettled).toHaveBeenLastCalledWith(...settledWith(null));
+
+      const offScope = slice.fetch({ id: 'b' });
+      scopeState.current = 'user-2:personal';
+      calls[1].resolve(null);
+      await expect(offScope).resolves.toMatchObject({ applied: false, missing: true });
+      expect(effects.onSettled).toHaveBeenLastCalledWith(...settledWith(null, 'b'));
+      expect(effects.onPurge).toHaveBeenCalledTimes(1);
+    });
+
+    it('is not called for a failed request', async () => {
+      const failure = new Error('offline');
+      const { calls, fetcher } = deferredFetcher();
+      const effects = effectSpies();
+      const { slice } = setup({ effects, fetcher });
+
+      const pending = slice.fetch({ id: 'a' });
+      calls[0].reject(failure);
+
+      await expect(pending).rejects.toBe(failure);
+      expect(effects.onError).toHaveBeenCalledTimes(1);
+      expect(effects.onSettled).not.toHaveBeenCalled();
+    });
+
+    it('runs once for a fetch that joined a mounted useSync request', async () => {
+      const { calls, fetcher } = deferredFetcher();
+      const effects = effectSpies();
+      const { slice } = setup({ effects, fetcher });
+
+      renderHook(() => slice.useSync({ id: 'a' }), { wrapper });
+      await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+      const pending = slice.fetch({ id: 'a' });
+      await act(async () => calls[0].resolve(['server']));
+      await pending;
+
+      expect(effects.onSettled).toHaveBeenCalledTimes(1);
+      expect(effects.onSettled).toHaveBeenCalledWith(...settledWith(['server'], 'a', 'sync'));
+    });
+
+    it('runs for a useSync response the hook moved past', async () => {
+      const { calls, fetcher } = deferredFetcher();
+      const effects = effectSpies();
+      const { slice } = setup({ effects, fetcher });
+
+      const { rerender } = renderHook(({ id }) => slice.useSync({ id }), {
+        initialProps: { id: 'a' },
+        wrapper,
+      });
+      await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+      rerender({ id: 'b' });
+      await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+      await act(async () => calls[0].resolve(['a from the server']));
+
+      await waitFor(() =>
+        expect(effects.onSettled).toHaveBeenCalledWith(
+          ...settledWith(['a from the server'], 'a', 'sync'),
+        ),
+      );
+    });
   });
 });
