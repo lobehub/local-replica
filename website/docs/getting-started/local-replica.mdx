@@ -1,0 +1,78 @@
+---
+title: The Local Replica Approach
+description: Server data fetch plus local data caching - the sweet spot between local-first and server-first.
+order: 2
+---
+
+We call this approach **Local Replica**: server data fetch + local data caching. It sits between the two usual architectures and takes the part of each that matters most.
+
+## Between server-first and local-first
+
+|                       | Server-first (fetch on demand) | **Local Replica**                          | Local-first (sync engine)         |
+| --------------------- | ------------------------------ | ------------------------------------------ | --------------------------------- |
+| Source of truth       | Server                         | **Server**                                 | Client database, synced to server |
+| What the client holds | An in-memory cache             | **A persisted replica of what it fetched** | A synced copy of the dataset      |
+| First paint           | After the network              | **From the replica**                       | From the local database           |
+| Writes                | Wait for the server            | **Optimistic, reconciled by the server**   | Local transactions, synced later  |
+| Backend               | Your APIs                      | **Your APIs**                              | Built around the sync protocol    |
+
+From server-first it keeps the simple architecture: your APIs, your auth, one source of truth. From local-first it takes the experience: instant paint, instant writes, consistent views. It skips the expensive middle (a client database, a sync protocol, offline conflict resolution), which is where most of a sync engine's cost lives.
+
+## How it works
+
+```text
+  Your existing APIs (REST / tRPC / server actions)   ← unchanged
+              │  fetcher
+              ▼
+  Your existing fetch layer (SWR)                      ← unchanged
+              │
+              ▼
+  ┌────────────── local-replica ──────────────┐
+  │ first frame painted from the local replica │
+  │ server responses reconcile in background   │
+  │ optimistic writes overlaid, rolled back    │
+  │ one entity propagated to every replica     │
+  │ partitioned by user + workspace            │
+  └────────────────────────────────────────────┘
+              │
+              ▼
+  Your existing store (Zustand)                        ← still the only UI source of truth
+              │  selectors
+              ▼
+          Components                                   ← read the store as before
+```
+
+- **The server stays the source of truth.** Data comes from your existing endpoints; your auth, business logic and database don't change.
+- **The local copy is only a replica.** It paints the first frame and carries optimistic writes, and every server response reconciles it.
+- **Adopt it incrementally.** One list at a time, no big-bang migration of the data layer.
+
+## What you don't have to think about
+
+"Add a local cache" sounds simple. The hard part is that once a replica is persisted, it outlives the session, the signed-in user and the write in flight. local-replica owns those problems so your feature code doesn't:
+
+- **First frame from the replica.** The last confirmed value is read from persistent storage before the network answers, so a reload or a revisit never flashes a skeleton.
+- **Server confirms quietly.** The head page from the network replaces the replica. Loaded pages, client-only rows and pending writes survive the replace.
+- **Writes land immediately.** Optimistic overlays apply right away. A failed write rolls back to the confirmed base plus any other writes still in flight. Optimistic values never reach storage.
+- **One entity, every copy.** `linkReplicaEntity` sends a patch or delete to every replica that holds the entity: the list row, the management page and the detail cache, including persisted rows that aren't loaded.
+- **Deletes stay deleted.** Dedicated primitives for an entity, a key or a whole resource purge every persisted variant and block hydrates already in flight, so a reload never resurrects deleted data. See [Invalidation](/guide/invalidation).
+- **Identity-safe.** Memory and storage are partitioned by scope (user + workspace). On a scope switch the view is cleared before paint, and late results from the previous scope are dropped.
+- **Bounded storage.** Opt in to a per-scope cap; the least recently used rows are evicted, never the ones on screen or with writes in flight. See [Bounding Storage](/guide/bounding).
+
+What you write: a resource definition, a fetcher, and a `useSync` call. See [Quick Start](/getting-started/quick-start).
+
+## Comparison
+
+|                                        | Plain SWR + store | **local-replica** | Linear-style sync engine |
+| -------------------------------------- | ----------------- | ----------------- | ------------------------ |
+| Instant open                           | ✗                 | ✓                 | ✓                        |
+| Instant writes                         | hand-written      | ✓                 | ✓                        |
+| Entity consistent across views         | hand-written      | ✓                 | ✓                        |
+| Backend changes                        | none              | **none**          | significant              |
+| Client database / schema migrations    | none              | **none**          | yes                      |
+| Reuses your existing APIs and auth     | ✓                 | **✓**             | restated in sync layer   |
+| Incremental adoption                   | –                 | **✓**             | hard                     |
+| Offline writes / real-time multiplayer | ✗                 | ✗                 | ✓                        |
+
+## Non-goals
+
+local-replica deliberately does **not** queue writes while offline, merge conflicts (CRDT / OT) or push server changes in real time. Giving those up is what keeps the backend untouched. If your product is built around multiplayer editing or offline authoring, a sync engine is the right tool.

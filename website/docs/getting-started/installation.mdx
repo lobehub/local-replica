@@ -1,0 +1,22 @@
+---
+title: Installation
+description: Install local-replica and pick the entry points your app needs.
+order: 3
+---
+
+## Install
+
+```bash
+npm i local-replica
+```
+
+`react` (for `useSync`) and `zustand` are optional peers, needed only by `local-replica/zustand`. The core entry is framework-agnostic.
+
+## Layers
+
+| Entry                   | What it owns                                                                                                                                                                                         |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `local-replica`         | Core engine, framework-agnostic: resource definition, pure reducer, paging (offset / cursor, forward / backward), entity links, serialized persistence, storage adapters (see [Storage](/guide/storage)). |
+| `local-replica/zustand` | Zustand adapter: binds a resource to one location in a domain store (`recordLens`). Adds a `useSync` hook that schedules fetches through a `ReplicaSyncDriver` (`createSWRDriver` for SWR).          |
+
+The host store stays the only UI source of truth. Components read the store through their usual selectors. `useSync` only reports fetch flags (`isHydrated`, `isValidating`, `error`, `revalidate`) and never returns data.

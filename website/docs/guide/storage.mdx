@@ -1,0 +1,14 @@
+---
+title: Storage
+description: Persist replicas through any key-value store; the two adapters that ship with the package.
+order: 1
+---
+
+A resource persists through any `ReplicaStorage` (`get` / `getStrict` / `set` / `remove`; see [Invalidation](/guide/invalidation) for the failure contract). Two adapters ship with the package, both keyed `<namespace>:<scope>:<queryKey>`:
+
+| Adapter                      | Backing                                                                                                     | Use                                                                                                                |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `KeyValueReplicaStorage`     | Any async key-value store `{ get, set, delete, initialize? }`: an IndexedDB object store, SQLite over IPC … | Lists and details of any size. Rows are stored as objects, so the store decides what it can clone.                 |
+| `LocalStorageReplicaStorage` | `window.localStorage` through a codec (JSON by default; pass superjson or similar for `Date`, `Map` …)      | Small values that must paint inside pre-paint initialization: `getSync(key)` reads a row without yielding a frame. |
+
+Both reject failed writes and deletes and implement `getStrict`, so every destructive pass works on them. Outside a browser `LocalStorageReplicaStorage` is a no-op miss.
