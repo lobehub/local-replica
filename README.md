@@ -1,12 +1,131 @@
 # local-replica
 
-Every list and detail the UI shows is a **replica**: a local copy of server state that paints on the first frame, then converges on the server in the background.
+**English** · [简体中文](./README.zh-CN.md)
+
+**A Linear-like, local-first feel, without rewriting your backend or adopting a sync engine.**
+
+Keep your APIs, your fetcher and your store. local-replica keeps a local replica of what the server last returned, so every list and detail paints on the first frame, writes land instantly, and the server reconciles quietly in the background.
+
+<!-- TODO: before / after reload GIF (skeleton flash vs instant paint) -->
+
+## Why
+
+### Everyone wants the Linear feel
+
+Linear feels fast because of three things:
+
+- **Instant open.** No spinner, no skeleton. A reload or a relaunch shows the data straight away.
+- **Instant writes.** A click takes effect before the server answers.
+- **Consistent everywhere.** Edit something once and the list, the detail page and the sidebar all update together.
+
+That is the local-first experience, and once users have it they don't want to go back.
+
+### Sync engines are a heavy price for application developers
+
+Linear gets there with a purpose-built sync engine. Getting the same experience the same way, whether you build your own or adopt Replicache, Zero, ElectricSQL, PowerSync and the like, usually means accepting some of these costs:
+
+| Cost                              | What it means in practice                                                                                                                                       |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Backend reshaped around sync**  | Change logs, versions or sync ids, push / pull endpoints. Writes go through the engine's mutation channel, so your existing REST / tRPC / server actions don't fit as they are. |
+| **A database in the client**      | A full object graph or table set lives locally, and every schema change needs a client-side migration too.                                                      |
+| **Permissions expressed twice**   | "What may this user sync" has to be restated in the sync layer, apart from the authorization your business logic already has.                                   |
+| **Bootstrap and data volume**     | Initial sync of a large workspace, incremental sync and local storage growth all need their own design.                                                         |
+| **Conflicts and debugging**       | The truth is spread over the client, the sync layer and the server, so a wrong value is hard to trace back.                                                     |
+| **Lock-in**                       | Your data layer is bound to one engine, often one database. Moving off it is expensive.                                                                         |
+
+To see what this takes in practice, read [Reverse Engineering Linear's Sync Engine](https://github.com/wzhudev/reverse-linear-sync-engine). Its author reconstructed Linear Sync Engine (LSE) from Linear's shipped (minified) frontend code, annotated it, and checked the result against Linear's public talks. Linear's CTO later called it more complete than Linear's own internal docs. What it uncovers:
+
+- **Models are a client-side ORM.** About 80 models are declared with decorators into a `ModelRegistry`, with load strategies (`instant`, `lazy`, `partial`, …), references and back-references. MobX makes them observable, and they live in an in-memory object pool.
+- **The client runs a database.** Bootstrapping fills one IndexedDB database per workspace (full, partial or local bootstrap). A hash of all model metadata decides when that database must be migrated, and data is hydrated lazily from it.
+- **Writes are transactions, not API calls.** `issue.title = '…'; issue.save()` produces a transaction. It is queued and cached in IndexedDB, sent in batches, and can be undone if the server rejects it.
+- **The server is a sequencer.** It executes every transaction under one global, increasing `syncId` and broadcasts delta packets over a WebSocket to every client, including the one that sent it. Access control is expressed as sync groups the client subscribes to.
+
+The resulting developer experience is excellent, but only because a frontend runtime, a client database with migrations, a transaction protocol and a server-side sequencer are all built to match.
+
+For a product designed around a sync engine from day one, like Linear, that is a sound investment. For most apps, which already have server APIs, a fetch layer and a store, it means starting the data layer over for the sake of UX, and then writing every new feature inside that mental model.
+
+### Most of the perceived speed doesn't need a sync engine
+
+Break down what users actually notice:
+
+- **Instant open** → paint the last confirmed value from local storage on the first frame.
+- **Instant writes** → optimistic updates.
+- **Consistent everywhere** → propagate one entity to every copy that holds it.
+
+All three can be done on the client, as long as data keeps coming from the server the normal way and the client keeps a local replica whose lifecycle is managed carefully.
+
+## Local Replica: the sweet spot between local-first and server-first
+
+We call this approach **Local Replica**: server data fetch + local data caching. It sits between the two usual architectures and takes the part of each that matters most:
+
+|                     | Server-first (fetch on demand) | **Local Replica**                         | Local-first (sync engine)          |
+| ------------------- | ------------------------------ | ----------------------------------------- | ---------------------------------- |
+| Source of truth     | Server                         | **Server**                                | Client database, synced to server  |
+| What the client holds | An in-memory cache           | **A persisted replica of what it fetched** | A synced copy of the dataset      |
+| First paint         | After the network              | **From the replica**                      | From the local database            |
+| Writes              | Wait for the server            | **Optimistic, reconciled by the server**  | Local transactions, synced later   |
+| Backend             | Your APIs                      | **Your APIs**                             | Built around the sync protocol     |
+
+From server-first it keeps the simple architecture: your APIs, your auth, one source of truth. From local-first it takes the experience: instant paint, instant writes, consistent views. It skips the expensive middle (a client database, a sync protocol, offline conflict resolution), which is where most of a sync engine's cost lives.
+
+### How it works
+
+```
+  Your existing APIs (REST / tRPC / server actions)   ← unchanged
+              │  fetcher
+              ▼
+  Your existing fetch layer (SWR)                      ← unchanged
+              │
+              ▼
+  ┌────────────── local-replica ──────────────┐
+  │ first frame painted from the local replica │
+  │ server responses reconcile in background   │
+  │ optimistic writes overlaid, rolled back    │
+  │ one entity propagated to every replica     │
+  │ partitioned by user + workspace            │
+  └────────────────────────────────────────────┘
+              │
+              ▼
+  Your existing store (Zustand)                        ← still the only UI source of truth
+              │  selectors
+              ▼
+          Components                                   ← read the store as before
+```
+
+- **The server stays the source of truth.** Data comes from your existing endpoints; your auth, business logic and database don't change.
+- **The local copy is only a replica.** It paints the first frame and carries optimistic writes, and every server response reconciles it.
+- **Adopt it incrementally.** One list at a time, no big-bang migration of the data layer.
+
+## What you don't have to think about
+
+"Add a local cache" sounds simple. The hard part is that once a replica is persisted, it outlives the session, the signed-in user and the write in flight. local-replica owns those problems so your feature code doesn't:
 
 - **First frame from the replica.** The last confirmed value is read from persistent storage before the network answers, so a reload or a revisit never flashes a skeleton.
 - **Server confirms quietly.** The head page from the network replaces the replica. Loaded pages, client-only rows and pending writes survive the replace.
 - **Writes land immediately.** Optimistic overlays apply right away. A failed write rolls back to the confirmed base plus any other writes still in flight. Optimistic values never reach storage.
-- **One entity, every copy.** `linkReplicaEntity` sends a patch or delete to every replica that holds the entity: the list row, the management page and the detail cache.
+- **One entity, every copy.** `linkReplicaEntity` sends a patch or delete to every replica that holds the entity: the list row, the management page and the detail cache, including persisted rows that aren't loaded.
+- **Deletes stay deleted.** Dedicated primitives for an entity, a key or a whole resource purge every persisted variant and block hydrates already in flight, so a reload never resurrects deleted data.
 - **Identity-safe.** Memory and storage are partitioned by scope (user + workspace). On a scope switch the view is cleared before paint, and late results from the previous scope are dropped.
+- **Bounded storage.** Opt in to a per-scope cap; the least recently used rows are evicted, never the ones on screen or with writes in flight.
+
+What you write: a resource definition, a fetcher, and a `useSync` call.
+
+## Comparison
+
+|                                       | Plain SWR + store | **local-replica** | Linear-style sync engine |
+| ------------------------------------- | ----------------- | ----------------- | ------------------------ |
+| Instant open                          | ✗                 | ✓                 | ✓                        |
+| Instant writes                        | hand-written      | ✓                 | ✓                        |
+| Entity consistent across views        | hand-written      | ✓                 | ✓                        |
+| Backend changes                       | none              | **none**          | significant              |
+| Client database / schema migrations   | none              | **none**          | yes                      |
+| Reuses your existing APIs and auth    | ✓                 | **✓**             | restated in sync layer   |
+| Incremental adoption                  | –                 | **✓**             | hard                     |
+| Offline writes / real-time multiplayer | ✗                | ✗                 | ✓                        |
+
+### Non-goals
+
+local-replica deliberately does **not** queue writes while offline, merge conflicts (CRDT / OT) or push server changes in real time. Giving those up is what keeps the backend untouched. If your product is built around multiplayer editing or offline authoring, a sync engine is the right tool.
 
 ## Install
 
@@ -18,14 +137,14 @@ npm i local-replica
 
 ## Layers
 
-| Entry                       | What it owns                                                                                                                                                                                        |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Entry                   | What it owns                                                                                                                                                                                        |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `local-replica`         | Core engine, framework-agnostic: resource definition, pure reducer, paging (offset / cursor, forward / backward), entity links, serialized persistence, storage adapters (see [Storage](#storage)). |
 | `local-replica/zustand` | Zustand adapter: binds a resource to one location in a domain store (`recordLens`). Adds a `useSync` hook that schedules fetches through a `ReplicaSyncDriver` (`createSWRDriver` for SWR).         |
 
 The host store stays the only UI source of truth. Components read the store through their usual selectors. `useSync` only reports fetch flags (`isHydrated`, `isValidating`, `error`, `revalidate`) and never returns data.
 
-## Usage
+## Quick start
 
 ```ts
 import { definePagedReplica, KeyValueReplicaStorage } from 'local-replica';
@@ -59,7 +178,9 @@ A persisted read is asynchronous, so a list hydrated only by `useSync` paints it
 
 A persisted row is only rewritten when its value changes: a persist whose value is deep-equal to what the engine last wrote to (or hydrated from) that row is skipped, so an unchanged revalidation costs no storage write. A failed write, a delete, an entity patch, an eviction or a `clear()` forgets what the row holds, so the next persist writes it again. The engine only tracks its own writes: a row changed behind it (another tab) is corrected by the next changed value or the next session.
 
-## Storage
+## Guides
+
+### Storage
 
 A resource persists through any `ReplicaStorage` (`get` / `getStrict` / `set` / `remove`; see [Invalidation](#invalidation) for the failure contract). Two adapters ship with the package, both keyed `<namespace>:<scope>:<queryKey>`:
 
@@ -70,7 +191,7 @@ A resource persists through any `ReplicaStorage` (`get` / `getStrict` / `set` / 
 
 Both reject failed writes and deletes and implement `getStrict`, so every destructive pass works on them. Outside a browser `LocalStorageReplicaStorage` is a no-op miss.
 
-## Fetching without a mounted view
+### Fetching without a mounted view
 
 `slice.revalidate(key)` only re-runs the `useSync` queries that are mounted. A store that needs the data while no view is mounted — a hover prefetch, a refresh after a mutation on a route without the list — calls `slice.fetch(params)` instead of calling the service and `replace` by hand:
 
@@ -89,6 +210,7 @@ Every head response, from `useSync` or `fetch`, goes through one settle pipeline
   ```ts
   createReplicaSlice(resource, {
     effects: {
+      onSettled: (data, params, ctx) => {}, // every successful response, even one the guards drop
       onApplied: (data, params, ctx) => {}, // folded into the active scope
       onMissing: (params, ctx) => {}, // `isMissing`, removed from the active scope
       onPurge: (params, ctx) => {}, // `isMissing` captured under a scope left behind
@@ -99,11 +221,11 @@ Every head response, from `useSync` or `fetch`, goes through one settle pipeline
   });
   ```
 
-  They run for `useSync` responses and `fetch` responses alike. A `useSync` request settles on its own response even when the hook has moved to another key and the driver skips its callback. `useSync`'s per-call `onSuccess` / `onError` remain for UI callbacks of that one view, and `onSuccess` is skipped for a key the hook has left.
+  They run for `useSync` responses and `fetch` responses alike. `onSettled` runs first, for every successful response, so per-request bookkeeping is released even when the response is never folded in. A `useSync` request settles on its own response even when the hook has moved to another key and the driver skips its callback. `useSync`'s per-call `onSuccess` / `onError` remain for UI callbacks of that one view, and `onSuccess` is skipped for a key the hook has left.
 
 Use `revalidate` when the views that show the data are mounted and should refetch on their own schedule. Use `fetch` when the caller needs the data now, needs to know whether it applied, or may run with nothing mounted.
 
-## Invalidation
+### Invalidation
 
 Persisted rows are kept per entry key **and** per query (`key?<query>`), so a resource can hold several rows for one key. Never delete through a plain `set` or by clearing SWR keys: the persisted rows survive and a reload paints the deleted data. Use the primitive that matches what is gone:
 
@@ -120,7 +242,7 @@ A `ReplicaStorage` must reject from `remove` when a delete did not land, and mus
 
 Prefer the narrowest call: an entity delete keeps the rest of every list; `remove(key)` is for a key whose whole value is gone or denied (NOT_FOUND / FORBIDDEN); `clear()` is for flows that invalidate everything the user has of that resource. `clear()` does not refetch: mounted views show their loading state until the next sync, so call `slice.revalidate()` after it when the server still has data to show.
 
-## Bounding persisted query variants
+### Bounding persisted query variants
 
 Every distinct key + query a resource persists is its own row, so a resource keyed (or queried) by free text — a search, a market filter, a per-topic bundle — would grow storage with every query the user ever ran. Opt in to a cap instead of hand-rolling a recency window around `remove`:
 
@@ -139,7 +261,7 @@ const searchList = defineReplica<Params, Result>({
 - **Never evicted.** A row with a mounted `useSync` (pinned for as long as it is mounted), an entry with pending optimistic writes, and an entry with a `loadMore` in flight. A view that renders an entry without `useSync` pins it with `slice.retain(key, storageKey)`, which returns the release.
 - **Failure.** A failed delete stays indexed and is picked again on the next use. An unreadable index (see `getStrict`) evicts nothing.
 
-## Transcripts and other irregular pages
+### Transcripts and other irregular pages
 
 Message-like resources page backward by cursor, with windows whose length changes on every refresh. The paging config covers them:
 

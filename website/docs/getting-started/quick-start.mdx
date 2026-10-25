@@ -1,0 +1,51 @@
+---
+title: Quick Start
+description: Define a paged replica, bind it to a Zustand store and sync it from a component.
+order: 4
+---
+
+## Define a resource and bind it to the store
+
+```ts
+import { definePagedReplica, KeyValueReplicaStorage } from 'local-replica';
+import { createReplicaSlice, createSWRDriver, recordLens } from 'local-replica/zustand';
+
+const topicList = definePagedReplica<Params, Topic, number, TopicPage>({
+  key: ({ agentId }) => `agent_${agentId}`,
+  name: 'topicList',
+  paging: { direction: 'forward', getId: (t) => t.id, mode: 'offset', persist: { pages: 1 } },
+  query: ({ sortBy }) => ({ sortBy }), // query identity beyond the key
+  scope, // ReplicaScope: { get, use, canPersist }
+  storage: (namespace) => new KeyValueReplicaStorage({ namespace, store }), // see Storage
+  version: 1,
+});
+
+const slice = createReplicaSlice(topicList, {
+  driver: createSWRDriver({ mutate, useSWR }),
+  fetcher: fetchTopicPage, // (params, cursor) => { items, total?, nextCursor? }
+  get,
+  set,
+  stateKey: 'topicListReplica', // bookkeeping slot: createReplicaState()
+  view: recordLens('topicDataMap'), // where the rendered value lives
+});
+
+slice.useSync(params); // in a component: hydrate, then sync
+slice.loadMore(key);
+slice.optimistic(key, apply, serverCall);
+```
+
+Components keep reading `topicDataMap` through their usual selectors. `useSync` hydrates the replica from storage, then lets the driver fetch and reconcile.
+
+## Paint without a skeleton on a cold start
+
+A persisted read is asynchronous, so a list hydrated only by `useSync` paints its loading state for a few frames on a cold start. When that list must paint without a skeleton, seed it from the route loader before the route commits: `slice.ensureScope(scope)` + `slice.hydrate(params, scope)`, bounded by `settleWithin(hydrate, ms)` so a stalled storage never holds the route back. A later `useSync` hydrate is a no-op once the slot is filled.
+
+## Writes only when the value changes
+
+A persisted row is only rewritten when its value changes: a persist whose value is deep-equal to what the engine last wrote to (or hydrated from) that row is skipped, so an unchanged revalidation costs no storage write. A failed write, a delete, an entity patch, an eviction or a `clear()` forgets what the row holds, so the next persist writes it again. The engine only tracks its own writes: a row changed behind it (another tab) is corrected by the next changed value or the next session.
+
+## Next steps
+
+- [Storage](/guide/storage): pick an adapter for IndexedDB, SQLite or localStorage.
+- [Fetching](/guide/fetching): fetch with no view mounted, and run side effects for every response.
+- [Invalidation](/guide/invalidation): delete an entity, a key or a whole resource so it stays deleted.
