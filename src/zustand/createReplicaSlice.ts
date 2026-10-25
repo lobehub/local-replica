@@ -119,18 +119,22 @@ export const createReplicaSlice = <TStore, TParams, TData, TFetched = TData>(
      */
     const isActive = resource.scope.get() === scope;
     const dropped: ReplicaSettled = { applied: false, current: false, isActive, missing: false };
+    const context: ReplicaSettleContext = { key, scope, source: request.source };
 
     // Discard a response that started before a `clear()` of its scope or a
     // `remove` of its entry (it holds wiped data), one for a query the entry
     // has moved past (the newer query owns the view, see `headQuery`), and one
     // older than a response already applied or a `fresh` fetch.
-    if (
+    const discarded =
       request.clearGeneration !== clearGeneration(scope) ||
       request.removalGeneration !== removalGeneration(scope, key) ||
       requests.isRetired(request) ||
-      !isActiveQuery(request)
-    )
-      return dropped;
+      !isActiveQuery(request);
+
+    // Every successful response settles the request — discarded, off-scope or
+    // dropped by `prepareHead` below — so per-request bookkeeping is released.
+    if (!('error' in outcome)) effects?.onSettled?.(outcome.data, params, context);
+    if (discarded) return dropped;
 
     if ('error' in outcome) {
       // Forwarded even off-scope: the captured `key`/`scope` lets a consumer
@@ -148,14 +152,13 @@ export const createReplicaSlice = <TStore, TParams, TData, TFetched = TData>(
       const missing = isMissingHead(outcome.data);
       if (missing) {
         remove(key, scope);
-        effects?.onPurge?.(params, { key, scope, source: request.source });
+        effects?.onPurge?.(params, context);
       }
       return { ...dropped, current: true, missing };
     }
 
     requests.retire(request.requestId, request.seq - 1);
     const { outcome: folded } = applyHead(params, outcome.data, scope);
-    const context: ReplicaSettleContext = { key, scope, source: request.source };
     if (folded === 'replaced') effects?.onApplied?.(outcome.data, params, context);
     else if (folded === 'missing') effects?.onMissing?.(params, context);
     return {
