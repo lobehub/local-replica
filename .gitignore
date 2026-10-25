@@ -5,3 +5,5 @@ coverage
 .DS_Store
 .vercel
 .env*
+.react-router/
+react-router.config.mjs
