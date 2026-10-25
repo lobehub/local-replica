@@ -54,7 +54,21 @@ Break down what users actually notice:
 
 All three can be done on the client, as long as data keeps coming from the server the normal way and the client keeps a local replica whose lifecycle is managed carefully.
 
-## How it works: server data fetch + local data caching
+## Local Replica: the sweet spot between local-first and server-first
+
+We call this approach **Local Replica**: server data fetch + local data caching. It sits between the two usual architectures and takes the part of each that matters most:
+
+|                     | Server-first (fetch on demand) | **Local Replica**                         | Local-first (sync engine)          |
+| ------------------- | ------------------------------ | ----------------------------------------- | ---------------------------------- |
+| Source of truth     | Server                         | **Server**                                | Client database, synced to server  |
+| What the client holds | An in-memory cache           | **A persisted replica of what it fetched** | A synced copy of the dataset      |
+| First paint         | After the network              | **From the replica**                      | From the local database            |
+| Writes              | Wait for the server            | **Optimistic, reconciled by the server**  | Local transactions, synced later   |
+| Backend             | Your APIs                      | **Your APIs**                             | Built around the sync protocol     |
+
+From server-first it keeps the simple architecture: your APIs, your auth, one source of truth. From local-first it takes the experience: instant paint, instant writes, consistent views. It skips the expensive middle (a client database, a sync protocol, offline conflict resolution), which is where most of a sync engine's cost lives.
+
+### How it works
 
 ```
   Your existing APIs (REST / tRPC / server actions)   ← unchanged
