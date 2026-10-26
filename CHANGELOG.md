@@ -2,6 +2,13 @@
 
 # Changelog
 
+# [0.1.0](https://github.com/lobehub/local-replica/compare/v0.0.5...v0.1.0) (2026-10-26)
+
+
+### ✨ Features
+
+* **docs**: Split package and site build outputs, add a comparison home page, closes [#9](https://github.com/lobehub/local-replica/issues/9) ([dcd4bb6](https://github.com/lobehub/local-replica/commit/dcd4bb6))
+
 ## [0.0.5](https://github.com/lobehub/local-replica/compare/v0.0.4...v0.0.5) (2026-10-25)
 
 
