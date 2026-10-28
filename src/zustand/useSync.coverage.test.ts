@@ -186,4 +186,44 @@ describe('useSync', () => {
     expect(seen).toEqual([['cached-a1'], ['cached-a2']]);
     session.unmount();
   });
+
+  it('ignores a driver callback for a hook that never asked for a sync', () => {
+    // A driver is not supposed to report a response to a hook that never had a
+    // sync key, but a stray callback must not invent a request for null params.
+    const callbacks: { onError: (error: unknown) => void; onSuccess: (data: string[]) => void }[] =
+      [];
+    const useQuery = vi.fn((_key: unknown, _fetcher: unknown, options: any) => {
+      if (options?.onError) callbacks.push(options);
+      return { isValidating: false, mutate: vi.fn() };
+    });
+    const resource = defineReplica<{ id: string }, string[]>({
+      fetcher: never,
+      key: ({ id }) => id,
+      name: 'neverActive',
+      scope,
+      version: 1,
+    });
+    const store = createStore<TestState>()(() => ({
+      lists: {},
+      listsReplica: createReplicaState(),
+    }));
+    const slice = createReplicaSlice<TestState, { id: string }, string[]>(resource, {
+      driver: { revalidate: vi.fn(), useQuery },
+      get: store.getState,
+      set: (partial) => store.setState(partial),
+      stateKey: 'listsReplica',
+      view: recordLens('lists'),
+    });
+    const onError = vi.fn();
+    const onSuccess = vi.fn();
+
+    renderHook(() => slice.useSync(null, { onError, onSuccess }), { wrapper });
+    const callback = callbacks.at(-1)!;
+
+    expect(() => act(() => callback.onError(new Error('stray')))).not.toThrow();
+    expect(() => act(() => callback.onSuccess(['stray']))).not.toThrow();
+    expect(onError).not.toHaveBeenCalled();
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(slice.debugPendingSyncRequests()).toBe(0);
+  });
 });

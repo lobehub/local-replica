@@ -144,9 +144,32 @@ export const createUseSync = <TStore, TParams, TData, TFetched>({
     }, [active, key, scope, hydration.data]);
 
     const syncKey = active && fetcher ? requests.syncKeyOf(params!, scope, key!) : null;
+    // The sync this hook last asked for. A driver may report a request that was
+    // in flight when the hook went inactive (SWR keeps the last non-null key and
+    // runs the *latest* render's callbacks, whose `params` is now null), so a
+    // callback settles against the sync it belongs to, not the current render.
+    const lastSync = useRef<{ key: string; params: TParams; scope: string; syncKey: readonly unknown[] }>(
+      undefined,
+    );
+    useLayoutEffect(() => {
+      if (syncKey) lastSync.current = { key: key!, params: params!, scope, syncKey };
+    });
     /** The request settling now: the one this sync id last started. */
-    const takeRequest = (response: unknown) =>
-      requests.takeSyncRequest(replicaRequestId(scope, syncKey), response, params!, scope);
+    const takeRequest = (response: unknown) => {
+      const sync = syncKey ? { key: key!, params: params!, scope, syncKey } : lastSync.current;
+      // Never active: no request of this hook can be settling.
+      if (!sync) return;
+      return {
+        key: sync.key,
+        request: requests.takeSyncRequest(
+          replicaRequestId(sync.scope, sync.syncKey),
+          response,
+          sync.params,
+          sync.scope,
+        ),
+        scope: sync.scope,
+      };
+    };
 
     const sync = driver.useQuery<TFetched>(
       syncKey,
@@ -159,16 +182,21 @@ export const createUseSync = <TStore, TParams, TData, TFetched>({
         // clear) never surfaces on the query now on screen; an off-scope one is
         // still forwarded with the captured key/scope (see `settle`).
         onError: (error: unknown) => {
-          const settled = requests.settle(takeRequest(error), { error });
-          if (settled.current) onError?.(error, { isActive: settled.isActive, key, scope });
+          const taken = takeRequest(error);
+          if (!taken) return;
+          const settled = requests.settle(taken.request, { error });
+          if (settled.current)
+            onError?.(error, { isActive: settled.isActive, key: taken.key, scope: taken.scope });
         },
         onSuccess: (data) => {
-          const settled = requests.settle(takeRequest(data), { data });
+          const taken = takeRequest(data);
+          if (!taken) return;
+          const settled = requests.settle(taken.request, { data });
           if (!settled.current || !settled.isActive) return;
           // A key the hook has moved past (g1 → g2 while g1's request is in
-          // flight): the response still fills g1's own entry, but this view's
-          // side effects would re-adopt g1 over the g2 view.
-          if (activeKey.current !== key) return;
+          // flight, or g1 → no key): the response still fills g1's own entry,
+          // but this view's side effects would re-adopt g1 over the g2 view.
+          if (activeKey.current !== taken.key) return;
           onSuccess?.(data);
         },
       },
