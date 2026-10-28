@@ -264,6 +264,61 @@ describe('createReplicaSlice', () => {
       expect(contexts[0]).toEqual({ isActive: true, key: 'a', scope: 'user-1:personal' });
     });
 
+    // SWR keeps the last non-null key when the hook's key turns null, so an
+    // in-flight response still reaches the *latest* render's callbacks — whose
+    // params are now null. The callback must settle the request it belongs to.
+    it('settles a request that fails after the hook lost its params', async () => {
+      let reject!: (error: unknown) => void;
+      const fetcher = vi.fn(
+        () =>
+          new Promise<string[]>((_resolve, rejectFetch) => {
+            reject = rejectFetch;
+          }),
+      );
+      const { slice } = setup({ fetcher });
+      const contexts: { isActive: boolean; key: string | undefined; scope: string }[] = [];
+
+      const session = renderHook(
+        ({ params }: { params: { id: string } | null }) =>
+          slice.useSync(params, { onError: (_error, context) => contexts.push(context) }),
+        { initialProps: { params: { id: 'a' } as { id: string } | null }, wrapper },
+      );
+      await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+
+      session.rerender({ params: null });
+      await act(async () => reject(new Error('gone')));
+
+      await waitFor(() => expect(contexts).toHaveLength(1));
+      expect(contexts[0]).toMatchObject({ key: 'a', scope: 'user-1:personal' });
+      await waitFor(() => expect(slice.debugPendingSyncRequests()).toBe(0));
+    });
+
+    it('settles a request that succeeds after the hook lost its params', async () => {
+      let resolve!: (data: string[]) => void;
+      const fetcher = vi.fn(
+        () =>
+          new Promise<string[]>((resolveFetch) => {
+            resolve = resolveFetch;
+          }),
+      );
+      const { slice, store } = setup({ fetcher });
+      const onSuccess = vi.fn();
+
+      const session = renderHook(
+        ({ params }: { params: { id: string } | null }) => slice.useSync(params, { onSuccess }),
+        { initialProps: { params: { id: 'a' } as { id: string } | null }, wrapper },
+      );
+      await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+
+      session.rerender({ params: null });
+      await act(async () => resolve(['late']));
+
+      // The response fills its own entry, but the view has no key to adopt it.
+      await waitFor(() => expect(store.getState().lists.a).toEqual(['late']));
+      expect(onSuccess).not.toHaveBeenCalled();
+      await waitFor(() => expect(slice.debugPendingSyncRequests()).toBe(0));
+    });
+
     it('evicts the persisted row when a response has nothing to persist', async () => {
       // Two bindings share one storage, so the second one reads what the first
       // one left behind — a reload of the same resource.
