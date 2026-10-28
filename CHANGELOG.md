@@ -2,6 +2,13 @@
 
 # Changelog
 
+## [0.1.1](https://github.com/lobehub/local-replica/compare/v0.1.0...v0.1.1) (2026-10-28)
+
+
+### 🐛 Bug Fixes
+
+* **zustand**: Settle a useSync request that lands after params turn null, closes [#10](https://github.com/lobehub/local-replica/issues/10) ([e935ffd](https://github.com/lobehub/local-replica/commit/e935ffd))
+
 # [0.1.0](https://github.com/lobehub/local-replica/compare/v0.0.5...v0.1.0) (2026-10-26)
 
 
