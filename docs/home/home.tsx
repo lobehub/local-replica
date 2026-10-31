@@ -129,7 +129,7 @@ export default function Home({
             }
             human={{
               code: INSTALL_COMMAND,
-              description: 'Install the package; react and zustand are optional peers',
+              description: 'Install the package',
             }}
           />
         }
@@ -137,19 +137,19 @@ export default function Home({
       />
 
       <LandingSection
-        description="Both lists below call the same simulated server. Run an action and compare what the user sees and how long they wait."
+        description="Three common ways to load server data, all calling the same simulated server. Run an action and compare what the user sees and how long they wait."
         eyebrow="Try it"
         eyebrowColor="blue"
         id="home-experience"
         renderLink={renderLink}
-        title="Same app, two architectures"
+        title="Same app, three approaches"
         onNavigate={navigate}
       >
         <ExperienceDemo />
       </LandingSection>
 
       <LandingSection
-        description="Local Replica gives users what a sync engine gives them, at the cost of a server-first app."
+        description="The common approaches side by side. Local Replica gives users what a sync engine gives them, at the cost of a server-first app."
         eyebrow="Compare"
         eyebrowColor="purple"
         id="home-comparison"
@@ -181,7 +181,7 @@ export default function Home({
       </LandingSection>
 
       <LandingSection
-        description="A resource definition, a fetcher and a useSync call. Your APIs, SWR and Zustand stay as they are."
+        description="A resource definition, a fetcher and a useSync call. Your APIs and your fetch layer stay as they are."
         eyebrow="Code"
         eyebrowColor="green"
         id="home-code"

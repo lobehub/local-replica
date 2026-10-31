@@ -52,11 +52,11 @@
 
 .panes {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 }
 
-@media (width <= 720px) {
+@media (width <= 960px) {
   .panes {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -85,18 +85,21 @@
 
 .paneHeader {
   display: flex;
-  gap: 12px;
-  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
   justify-content: space-between;
 }
 
 .paneTitle {
+  font-family: var(--lobe-font-family-code);
   font-size: 15px;
   font-weight: 600;
   color: var(--lobe-color-text);
 }
 
 .paneSubtitle {
+  margin-block-start: -6px;
   font-size: 12px;
   color: var(--lobe-color-text-tertiary);
 }
