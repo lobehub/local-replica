@@ -19,10 +19,13 @@ export interface CreateReplicaSliceOptions<TStore, TParams, TData, TFetched> ext
   effects?: ReplicaEffects<TParams, TFetched>;
   get: () => TStore;
   set: Setter<TStore>;
-  /** Store field holding the {@link ReplicaState} bookkeeping slot. */
-  stateKey: keyof TStore & string;
+  /**
+   * Store field holding the {@link ReplicaState} bookkeeping slot. The store
+   * type comes from `get` / `set`, never from this field.
+   */
+  stateKey: keyof NoInfer<TStore> & string;
   /** Where the view lives in the store; `recordLens(field)` covers `Record<key, TData>`. */
-  view: ReplicaLens<TStore, TData>;
+  view: ReplicaLens<NoInfer<TStore>, TData>;
 }
 
 /**

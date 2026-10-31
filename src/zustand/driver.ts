@@ -81,6 +81,15 @@ type SWRLikeHook = (
 ) => { data?: any; error?: unknown; isValidating: boolean; mutate: () => Promise<any> };
 
 /**
+ * The two calls the SWR driver makes on `mutate`. SWR's own `mutate` (global or
+ * from `useSWRConfig`) satisfies it as is.
+ */
+export interface SWRLikeMutate {
+  (match: (key: any) => boolean): Promise<unknown>;
+  (key: any, data: unknown, options: { revalidate: boolean }): Promise<unknown>;
+}
+
+/**
  * Driver over SWR. Pass the app's own hook and scoped `mutate` when it wraps
  * SWR (custom cache provider, key augmentation, retry policy).
  */
@@ -93,9 +102,7 @@ export const createSWRDriver = ({
    * `mutate(key, data, { revalidate: false })` to seed — pass the arguments
    * through unchanged: SWR tells a revalidation from a write by their count.
    */
-  mutate: (
-    ...args: [match: (key: any) => boolean] | [key: unknown, data: unknown, options: object]
-  ) => Promise<unknown>;
+  mutate: SWRLikeMutate;
   useSWR: SWRLikeHook;
 }): ReplicaSyncDriver => ({
   revalidate: (match) => mutate(match),
