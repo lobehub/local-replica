@@ -1,4 +1,12 @@
-import { Check, CircleAlert, LoaderCircle, Pencil, RefreshCw, Undo2 } from 'lucide-react';
+import {
+  Check,
+  CircleAlert,
+  LoaderCircle,
+  LogIn,
+  Pencil,
+  RefreshCw,
+  Undo2,
+} from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import styles from './experience.module.css';
@@ -22,7 +30,45 @@ interface Pane {
   status: { label: string; tone: Tone };
 }
 
-type Action = 'fail' | 'reload' | 'rename';
+type Action = 'fail' | 'reload' | 'rename' | 'revisit';
+
+type Kind = 'effect' | 'replica' | 'swr';
+
+const KINDS: Kind[] = ['effect', 'swr', 'replica'];
+
+interface Approach {
+  /** Paints the previous value right away for a fetch action. */
+  instantOn: Action[];
+  /** Applies a write before the server answers. */
+  optimistic: boolean;
+  subtitle: string;
+  syncLabel: string;
+  title: string;
+}
+
+const APPROACHES: Record<Kind, Approach> = {
+  effect: {
+    instantOn: [],
+    optimistic: false,
+    subtitle: 'fetch on mount, state in the component',
+    syncLabel: 'Loading…',
+    title: 'useEffect',
+  },
+  replica: {
+    instantOn: ['reload', 'revisit'],
+    optimistic: true,
+    subtitle: 'persisted replica, reconciled in the background',
+    syncLabel: 'Syncing in background',
+    title: 'local-replica',
+  },
+  swr: {
+    instantOn: ['revisit'],
+    optimistic: false,
+    subtitle: 'in-memory cache, stale-while-revalidate',
+    syncLabel: 'Revalidating',
+    title: 'SWR',
+  },
+};
 
 const INITIAL_ROWS: Row[] = [
   { id: 'roadmap', title: 'Q3 roadmap' },
@@ -34,9 +80,10 @@ const TEAMMATE_ROW: Row = { id: 'pricing', title: 'Pricing page review' };
 
 const RENAMED = 'Q3 roadmap (final)';
 
-const idlePane = (): Pane => ({
-  rows: INITIAL_ROWS,
-  status: { label: 'Up to date', tone: 'idle' },
+const idlePanes = (): Record<Kind, Pane> => ({
+  effect: { rows: INITIAL_ROWS, status: { label: 'Up to date', tone: 'idle' } },
+  replica: { rows: INITIAL_ROWS, status: { label: 'Up to date', tone: 'idle' } },
+  swr: { rows: INITIAL_ROWS, status: { label: 'Up to date', tone: 'idle' } },
 });
 
 const patch = (rows: Row[] | null, id: string, next: Partial<Row>) =>
@@ -50,23 +97,19 @@ const StatusIcon = ({ tone }: { tone: Tone }) => {
   return <Check size={14} />;
 };
 
-function PaneView({ kind, pane }: { kind: 'replica' | 'server'; pane: Pane }) {
-  const isReplica = kind === 'replica';
+function PaneView({ kind, pane }: { kind: Kind; pane: Pane }) {
+  const approach = APPROACHES[kind];
 
   return (
-    <div className={`${styles.pane} ${isReplica ? styles.paneReplica : ''}`}>
+    <div className={`${styles.pane} ${kind === 'replica' ? styles.paneReplica : ''}`}>
       <div className={styles.paneHeader}>
-        <div>
-          <div className={styles.paneTitle}>{isReplica ? 'Local Replica' : 'Server-first'}</div>
-          <div className={styles.paneSubtitle}>
-            {isReplica ? 'SWR + Zustand + local-replica' : 'SWR + Zustand'}
-          </div>
-        </div>
+        <div className={styles.paneTitle}>{approach.title}</div>
         <div className={styles.status} data-tone={pane.status.tone}>
           <StatusIcon tone={pane.status.tone} />
           {pane.status.label}
         </div>
       </div>
+      <div className={styles.paneSubtitle}>{approach.subtitle}</div>
 
       <div className={styles.window}>
         <div className={styles.windowBar}>
@@ -121,13 +164,19 @@ function PaneView({ kind, pane }: { kind: 'replica' | 'server'; pane: Pane }) {
 }
 
 export function ExperienceDemo() {
-  const [server, setServer] = useState<Pane>(idlePane);
-  const [replica, setReplica] = useState<Pane>(idlePane);
+  const [panes, setPanes] = useState<Record<Kind, Pane>>(idlePanes);
   const [running, setRunning] = useState(false);
   const serverRows = useRef<Row[]>(INITIAL_ROWS);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
+
+  const update = (fn: (pane: Pane, kind: Kind) => Pane) =>
+    setPanes((current) => {
+      const next = { ...current };
+      for (const kind of KINDS) next[kind] = fn(current[kind], kind);
+      return next;
+    });
 
   const later = (fn: () => void) => {
     timers.current.push(
@@ -138,42 +187,51 @@ export function ExperienceDemo() {
     );
   };
 
-  const run = (action: Action) => {
-    setRunning(true);
+  const fetchAgain = (action: 'reload' | 'revisit') => {
+    const hasTeammateRow = serverRows.current.some((row) => row.id === TEAMMATE_ROW.id);
+    if (!hasTeammateRow) serverRows.current = [...serverRows.current, TEAMMATE_ROW];
+    const next = serverRows.current;
+    const label = 'Content visible after';
+    const isInstant = (kind: Kind) => APPROACHES[kind].instantOn.includes(action);
 
-    if (action === 'reload') {
-      const hasTeammateRow = serverRows.current.some((row) => row.id === TEAMMATE_ROW.id);
-      if (!hasTeammateRow) serverRows.current = [...serverRows.current, TEAMMATE_ROW];
-      const next = serverRows.current;
+    update((pane, kind) =>
+      isInstant(kind)
+        ? {
+            metric: { label, ms: 0 },
+            rows: pane.rows && clean(pane.rows),
+            status: { label: APPROACHES[kind].syncLabel, tone: 'busy' },
+          }
+        : {
+            metric: { label, ms: null },
+            rows: null,
+            status: {
+              label: kind === 'swr' ? 'Memory cache empty, loading…' : 'Loading…',
+              tone: 'busy',
+            },
+          },
+    );
 
-      setServer({
-        metric: { label: 'Content visible after', ms: null },
-        rows: null,
-        status: { label: 'Loading…', tone: 'busy' },
-      });
-      setReplica((pane) => ({
-        metric: { label: 'Content visible after', ms: 0 },
-        rows: pane.rows && clean(pane.rows),
-        status: { label: 'Syncing in background', tone: 'busy' },
-      }));
-      later(() => {
-        setServer({
-          metric: { label: 'Content visible after', ms: LATENCY },
-          rows: clean(next),
-          status: { label: 'Loaded', tone: 'ok' },
-        });
-        setReplica((pane) => ({
-          ...pane,
-          rows: next.map((row) => ({
-            ...row,
-            fresh: !pane.rows?.some((shown) => shown.id === row.id),
-          })),
-          status: { label: 'Synced with server', tone: 'ok' },
-        }));
-      });
-      return;
-    }
+    later(() =>
+      update((pane, kind) =>
+        isInstant(kind)
+          ? {
+              ...pane,
+              rows: next.map((row) => ({
+                ...row,
+                fresh: !pane.rows?.some((shown) => shown.id === row.id),
+              })),
+              status: { label: 'Synced with server', tone: 'ok' },
+            }
+          : {
+              metric: { label, ms: LATENCY },
+              rows: clean(next),
+              status: { label: 'Loaded', tone: 'ok' },
+            },
+      ),
+    );
+  };
 
+  const write = (action: 'fail' | 'rename') => {
     const id = action === 'rename' ? 'roadmap' : 'sync';
     const original = serverRows.current.find((row) => row.id === id)?.title ?? '';
     const title =
@@ -182,44 +240,59 @@ export function ExperienceDemo() {
           ? INITIAL_ROWS[0].title
           : RENAMED
         : `${original} v2`;
+    const label = 'Feedback after';
 
-    setServer((pane) => ({
-      metric: { label: 'Feedback after', ms: null },
-      rows: patch(pane.rows && clean(pane.rows), id, { pending: true }),
-      status: { label: 'Saving…', tone: 'busy' },
-    }));
-    setReplica((pane) => ({
-      metric: { label: 'Feedback after', ms: 0 },
-      rows: patch(pane.rows && clean(pane.rows), id, { pending: true, title }),
-      status: { label: 'Confirming with server', tone: 'busy' },
-    }));
+    update((pane, kind) =>
+      APPROACHES[kind].optimistic
+        ? {
+            metric: { label, ms: 0 },
+            rows: patch(pane.rows && clean(pane.rows), id, { pending: true, title }),
+            status: { label: 'Confirming with server', tone: 'busy' },
+          }
+        : {
+            metric: { label, ms: null },
+            rows: patch(pane.rows && clean(pane.rows), id, { pending: true }),
+            status: { label: 'Saving…', tone: 'busy' },
+          },
+    );
 
     later(() => {
       if (action === 'rename') {
         serverRows.current = patch(serverRows.current, id, { title }) ?? serverRows.current;
-        setServer((pane) => ({
-          metric: { label: 'Feedback after', ms: LATENCY },
-          rows: patch(pane.rows, id, { pending: false, title }),
-          status: { label: 'Saved', tone: 'ok' },
-        }));
-        setReplica((pane) => ({
-          ...pane,
-          rows: patch(pane.rows, id, { pending: false }),
-          status: { label: 'Confirmed by server', tone: 'ok' },
-        }));
-      } else {
-        setServer((pane) => ({
-          metric: { label: 'Feedback after', ms: LATENCY },
-          rows: patch(pane.rows, id, { pending: false }),
-          status: { label: 'Save failed', tone: 'error' },
-        }));
-        setReplica((pane) => ({
-          ...pane,
-          rows: patch(pane.rows, id, { pending: false, rolledBack: true, title: original }),
-          status: { label: 'Server rejected, rolled back', tone: 'error' },
-        }));
       }
+      update((pane, kind) => {
+        if (APPROACHES[kind].optimistic) {
+          return action === 'rename'
+            ? {
+                ...pane,
+                rows: patch(pane.rows, id, { pending: false }),
+                status: { label: 'Confirmed by server', tone: 'ok' },
+              }
+            : {
+                ...pane,
+                rows: patch(pane.rows, id, { pending: false, rolledBack: true, title: original }),
+                status: { label: 'Rejected, rolled back', tone: 'error' },
+              };
+        }
+        return action === 'rename'
+          ? {
+              metric: { label, ms: LATENCY },
+              rows: patch(pane.rows, id, { pending: false, title }),
+              status: { label: 'Saved', tone: 'ok' },
+            }
+          : {
+              metric: { label, ms: LATENCY },
+              rows: patch(pane.rows, id, { pending: false }),
+              status: { label: 'Save failed', tone: 'error' },
+            };
+      });
     });
+  };
+
+  const run = (action: Action) => {
+    setRunning(true);
+    if (action === 'reload' || action === 'revisit') fetchAgain(action);
+    else write(action);
   };
 
   return (
@@ -228,6 +301,10 @@ export function ExperienceDemo() {
         <button disabled={running} onClick={() => run('reload')} type="button">
           <RefreshCw size={14} />
           Reload the page
+        </button>
+        <button disabled={running} onClick={() => run('revisit')} type="button">
+          <LogIn size={14} />
+          Leave and come back
         </button>
         <button disabled={running} onClick={() => run('rename')} type="button">
           <Pencil size={14} />
@@ -240,8 +317,9 @@ export function ExperienceDemo() {
         <span className={styles.latency}>Simulated server latency: {LATENCY / 1000} s</span>
       </div>
       <div className={styles.panes}>
-        <PaneView kind="server" pane={server} />
-        <PaneView kind="replica" pane={replica} />
+        {KINDS.map((kind) => (
+          <PaneView key={kind} kind={kind} pane={panes[kind]} />
+        ))}
       </div>
     </div>
   );

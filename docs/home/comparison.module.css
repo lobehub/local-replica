@@ -8,8 +8,8 @@
 
 .grid {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) repeat(3, minmax(190px, 1.2fr));
-  min-width: 760px;
+  grid-template-columns: minmax(150px, 0.9fr) repeat(4, minmax(160px, 1fr));
+  min-width: 840px;
   font-size: 13px;
 }
 

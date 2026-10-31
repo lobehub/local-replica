@@ -1,4 +1,3 @@
-import { Highlighter } from '@lobehub/ui';
 import {
   AgentSkillCard,
   FeatureGrid,
@@ -14,6 +13,7 @@ import { Link, useNavigate } from 'react-router';
 import { Comparison } from './Comparison';
 import { ExperienceDemo } from './ExperienceDemo';
 import { renderLink } from './renderLink';
+import { WriteSteps } from './WriteSteps';
 
 const SITE_URL = 'https://local-replica.lobehub.com';
 const GITHUB_URL = 'https://github.com/lobehub/local-replica';
@@ -64,27 +64,6 @@ const FEATURES: FeatureGridItem[] = [
   },
 ];
 
-const CODE = `const topicList = definePagedReplica({
-  key: ({ agentId }) => \`agent_\${agentId}\`,
-  name: 'topicList',
-  paging: { direction: 'forward', getId: (t) => t.id, mode: 'offset' },
-  scope,
-  storage: (namespace) => new KeyValueReplicaStorage({ namespace, store }),
-  version: 1,
-});
-
-const slice = createReplicaSlice(topicList, {
-  driver: createSWRDriver({ mutate, useSWR }),
-  fetcher: fetchTopicPage, // your existing API, unchanged
-  get,
-  set,
-  stateKey: 'topicListReplica',
-  view: recordLens('topicDataMap'), // components keep their selectors
-});
-
-// in a component: paint from the replica, then sync
-slice.useSync({ agentId });`;
-
 export default function Home({
   description,
   getStartedPathname,
@@ -129,7 +108,7 @@ export default function Home({
             }
             human={{
               code: INSTALL_COMMAND,
-              description: 'Install the package; react and zustand are optional peers',
+              description: 'Install the package',
             }}
           />
         }
@@ -137,19 +116,19 @@ export default function Home({
       />
 
       <LandingSection
-        description="Both lists below call the same simulated server. Run an action and compare what the user sees and how long they wait."
+        description="Three common ways to load server data, all calling the same simulated server. Run an action and compare what the user sees and how long they wait."
         eyebrow="Try it"
         eyebrowColor="blue"
         id="home-experience"
         renderLink={renderLink}
-        title="Same app, two architectures"
+        title="Same app, three approaches"
         onNavigate={navigate}
       >
         <ExperienceDemo />
       </LandingSection>
 
       <LandingSection
-        description="Local Replica gives users what a sync engine gives them, at the cost of a server-first app."
+        description="The common approaches side by side. Local Replica gives users what a sync engine gives them, at the cost of a server-first app."
         eyebrow="Compare"
         eyebrowColor="purple"
         id="home-comparison"
@@ -181,7 +160,7 @@ export default function Home({
       </LandingSection>
 
       <LandingSection
-        description="A resource definition, a fetcher and a useSync call. Your APIs, SWR and Zustand stay as they are."
+        description="Three steps on top of what you already have. The fetcher is your existing API, and components keep reading from your store."
         eyebrow="Code"
         eyebrowColor="green"
         id="home-code"
@@ -197,9 +176,7 @@ export default function Home({
         ]}
         onNavigate={navigate}
       >
-        <Highlighter language={'ts'} style={{ fontSize: 13, width: '100%' }} variant={'filled'}>
-          {CODE}
-        </Highlighter>
+        <WriteSteps />
       </LandingSection>
 
       <InstallBanner
