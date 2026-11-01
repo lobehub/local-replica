@@ -11,15 +11,19 @@ interface Cell {
 }
 
 interface Row {
-  cells: [Cell, Cell, Cell];
+  cells: [Cell, Cell, Cell, Cell];
   label: string;
 }
 
 const COLUMNS = [
-  { name: 'Server-first', stack: 'SWR / React Query + store' },
-  { name: 'Local Replica', stack: 'local-replica' },
-  { name: 'Local-first', stack: 'Linear-style sync engine' },
+  { name: 'useEffect', stack: 'fetch on mount' },
+  { name: 'SWR', stack: 'SWR / React Query' },
+  { name: 'local-replica', stack: 'Local Replica' },
+  { name: 'Sync engine', stack: 'Linear-style local-first' },
 ];
+
+/** The highlighted column. */
+const PICK = 2;
 
 const good = (text: string): Cell => ({ text, tone: 'good' });
 const mid = (text: string): Cell => ({ text, tone: 'mid' });
@@ -30,17 +34,28 @@ const GROUPS: { rows: Row[]; title: string }[] = [
     title: 'What users feel',
     rows: [
       {
-        label: 'Open or reload a page',
+        label: 'Reload or reopen the app',
         cells: [
           bad('Skeleton until the network answers'),
+          bad('Skeleton: the memory cache is gone'),
           good('Paints the replica on the first frame'),
           good('Paints from the local database'),
         ],
       },
       {
+        label: 'Come back to a page',
+        cells: [
+          bad('Skeleton again, every visit'),
+          good('Cached value, revalidated'),
+          good('Replica, reconciled in the background'),
+          good('Local database'),
+        ],
+      },
+      {
         label: 'Edit something',
         cells: [
-          mid('Waits for the server, or hand-written optimism'),
+          bad('Waits for the server, then refetches'),
+          mid('Waits, unless optimistic data is written by hand'),
           good('Instant, rolls back if the server rejects'),
           good('Instant, queued as a transaction'),
         ],
@@ -48,7 +63,8 @@ const GROUPS: { rows: Row[]; title: string }[] = [
       {
         label: 'Same item in several views',
         cells: [
-          mid('Each cache patched by hand'),
+          bad('Each component holds its own copy'),
+          mid('Every cache key mutated by hand'),
           good('One patch reaches every replica'),
           good('One object graph'),
         ],
@@ -56,14 +72,15 @@ const GROUPS: { rows: Row[]; title: string }[] = [
       {
         label: 'Switch account or workspace',
         cells: [
-          mid('Caches cleared by hand'),
+          bad('Races between responses handled by hand'),
+          mid('Cache keys and clearing handled by hand'),
           good('Partitioned by scope, stale responses dropped'),
           good('One database per workspace'),
         ],
       },
       {
         label: 'Offline edits, live multiplayer',
-        cells: [bad('No'), bad('No, by design'), good('Yes')],
+        cells: [bad('No'), bad('No'), bad('No, by design'), good('Yes')],
       },
     ],
   },
@@ -72,19 +89,16 @@ const GROUPS: { rows: Row[]; title: string }[] = [
     rows: [
       {
         label: 'Backend changes',
-        cells: [
-          good('None'),
-          good('None, keeps your APIs'),
-          bad('Sync protocol and sequencer'),
-        ],
+        cells: [good('None'), good('None'), good('None'), bad('Sync protocol and sequencer')],
       },
       {
         label: 'Client database and migrations',
-        cells: [good('None'), good('Versioned key-value rows'), bad('Yes')],
+        cells: [good('None'), good('None'), good('Versioned key-value rows'), bad('Yes')],
       },
       {
         label: 'Permissions',
         cells: [
+          good('Your existing auth'),
           good('Your existing auth'),
           good('Your existing auth'),
           bad('Restated as sync rules'),
@@ -92,7 +106,12 @@ const GROUPS: { rows: Row[]; title: string }[] = [
       },
       {
         label: 'Adoption',
-        cells: [good('Already there'), good('One list at a time'), bad('The whole data layer')],
+        cells: [
+          good('Already there'),
+          good('One hook per query'),
+          good('One list at a time'),
+          bad('The whole data layer'),
+        ],
       },
     ],
   },
@@ -120,11 +139,11 @@ export function Comparison() {
         <div className={styles.corner} role="columnheader" />
         {COLUMNS.map((column, index) => (
           <div
-            className={`${styles.head} ${index === 1 ? styles.highlight : ''}`}
+            className={`${styles.head} ${index === PICK ? styles.highlight : ''}`}
             key={column.name}
             role="columnheader"
           >
-            {index === 1 && <span className={styles.pill}>Sweet spot</span>}
+            {index === PICK && <span className={styles.pill}>Sweet spot</span>}
             <div className={styles.headName}>{column.name}</div>
             <div className={styles.headStack}>{column.stack}</div>
           </div>
@@ -135,9 +154,12 @@ export function Comparison() {
             <div className={styles.group} role="rowheader">
               {group.title}
             </div>
-            <div className={styles.groupFill} />
-            <div className={`${styles.groupFill} ${styles.highlight}`} />
-            <div className={styles.groupFill} />
+            {COLUMNS.map((column, index) => (
+              <div
+                className={`${styles.groupFill} ${index === PICK ? styles.highlight : ''}`}
+                key={column.name}
+              />
+            ))}
             {group.rows.map((row, rowIndex) => {
               const last =
                 groupIndex === GROUPS.length - 1 && rowIndex === group.rows.length - 1;
@@ -148,8 +170,8 @@ export function Comparison() {
                   </div>
                   {row.cells.map((cell, index) => (
                     <div
-                      className={`${styles.cell} ${index === 1 ? styles.highlight : ''}`}
-                      data-last={(index === 1 && last) || undefined}
+                      className={`${styles.cell} ${index === PICK ? styles.highlight : ''}`}
+                      data-last={(index === PICK && last) || undefined}
                       key={index}
                       role="cell"
                     >
