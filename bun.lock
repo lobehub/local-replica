@@ -14,6 +14,7 @@
         "@lobehub/semantic-release-config": "^2.1.7",
         "@lobehub/ui": "^6.9.0",
         "@react-router/dev": "^8.5.0",
+        "@tanstack/react-query": "^5.105.0",
         "@testing-library/react": "^16.3.3",
         "@types/react": "^19.3.0",
         "@vitest/coverage-v8": "^5.0.5",
@@ -555,6 +556,10 @@
     "@tanstack/form-core": ["@tanstack/form-core@1.33.5", "https://registry.npmmirror.com/@tanstack/form-core/-/form-core-1.33.5.tgz", { "dependencies": { "@tanstack/devtools-event-client": "^0.4.1", "@tanstack/pacer-lite": "^0.1.1", "@tanstack/store": "^0.11.0" } }, "sha512-3dfx9MBP0aq5sXKteikG629X9oviptrQj0IFRk9YGcb+lB7Kv5x8S17oOSk1wUWgjQZ4xVJEMbKwOAODymocgA=="],
 
     "@tanstack/pacer-lite": ["@tanstack/pacer-lite@0.1.1", "https://registry.npmmirror.com/@tanstack/pacer-lite/-/pacer-lite-0.1.1.tgz", {}, "sha512-y/xtNPNt/YeyoVxE/JCx+T7yjEzpezmbb+toK8DDD1P4m7Kzs5YR956+7OKexG3f8aXgC3rLZl7b1V+yNUSy5w=="],
+
+    "@tanstack/query-core": ["@tanstack/query-core@5.105.0", "https://registry.npmmirror.com/@tanstack/query-core/-/query-core-5.105.0.tgz", {}, "sha512-7p56vRmT/z4UJ6sctGIdl5WRUQyUv53IUpUwEKi2g97zMbO7zh8ZsCLffGAvCPBR4xD72e3VXsDyLwXHhoNTMQ=="],
+
+    "@tanstack/react-query": ["@tanstack/react-query@5.105.0", "https://registry.npmmirror.com/@tanstack/react-query/-/react-query-5.105.0.tgz", { "dependencies": { "@tanstack/query-core": "5.105.0" }, "peerDependencies": { "@types/react": "^18 || ^19", "react": "^18 || ^19" }, "optionalPeers": ["@types/react"] }, "sha512-y+hMuDERvgg6ay1da0V1a6ZC0ZONt7dELxSFkqRZuwm7p1TTZs0MoXrPlBRflIpRoYjvzQVYxycnLImpFLhWrw=="],
 
     "@tanstack/react-store": ["@tanstack/react-store@0.11.2", "https://registry.npmmirror.com/@tanstack/react-store/-/react-store-0.11.2.tgz", { "dependencies": { "@tanstack/store": "0.11.2", "use-sync-external-store": "^1.6.0" }, "peerDependencies": { "react": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0", "react-dom": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0" } }, "sha512-oj5O5DmiMWE+ih+SioX2ayC1kbK7d3fpLx0B75fPJr9nY3zU+hoW010yr64qXsY/9fyiLVE2bn5mGNV3owm8RQ=="],
 

@@ -31,6 +31,8 @@ function TopicList({ agentId }) {
 }
 ```
 
+Using React Query? Pass your client instead: `driver: createReactQueryDriver({ queryClient, useQuery })`, with `useQuery` from `@tanstack/react-query`.
+
 The object `createReplica` returns also carries `optimistic`, `remove`, `fetch`, `read(params)` and the other slice methods.
 
 ## In your own store
