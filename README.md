@@ -133,18 +133,52 @@ local-replica deliberately does **not** queue writes while offline, merge confli
 npm i local-replica
 ```
 
-`react` (for `useSync`) and `zustand` are optional peers, needed only by `local-replica/zustand`. The core entry is framework-agnostic.
+`react` and `zustand` are optional peers: `local-replica/react` needs `react`, `local-replica/zustand` needs both. Both bindings schedule requests through a driver, and `createSWRDriver` needs `swr`. The core entry is framework-agnostic.
 
 ## Layers
 
 | Entry                   | What it owns                                                                                                                                                                                        |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `local-replica`         | Core engine, framework-agnostic: resource definition, pure reducer, paging (offset / cursor, forward / backward), entity links, serialized persistence, storage adapters (see [Storage](#storage)). |
+| `local-replica/react`   | React binding without a store of your own: `createReplica(resource, { driver })` returns a `useReplica(params)` hook that returns `{ data, error, isHydrated, isValidating, revalidate }` like `useSWR`, plus the slice methods (`optimistic`, `remove`, `fetch` …). |
 | `local-replica/zustand` | Zustand adapter: binds a resource to one location in a domain store (`recordLens`). Adds a `useSync` hook that schedules fetches through a `ReplicaSyncDriver` (`createSWRDriver` for SWR).         |
 
-The host store stays the only UI source of truth. Components read the store through their usual selectors. `useSync` only reports fetch flags (`isHydrated`, `isValidating`, `error`, `revalidate`) and never returns data.
+With `local-replica/react`, the hook returns the data, like `useSWR`, and the replica keeps it in a store of its own. With `local-replica/zustand`, the host store stays the only UI source of truth: components read the store through their usual selectors, and `useSync` only reports fetch flags (`isHydrated`, `isValidating`, `error`, `revalidate`).
 
 ## Quick start
+
+### Without a store (`local-replica/react`)
+
+For apps that fetch with `useEffect` or plain SWR: swap one hook.
+
+```tsx
+import { defineReplica, LocalStorageReplicaStorage } from 'local-replica';
+import { createReplica, createSWRDriver } from 'local-replica/react';
+import useSWR, { mutate } from 'swr';
+
+const topics = defineReplica({
+  name: 'topics',
+  version: 1,
+  key: ({ agentId }) => agentId,
+  fetcher: ({ agentId }) => api.getTopics(agentId), // your existing API
+  storage: (namespace) => new LocalStorageReplicaStorage({ namespace }),
+});
+
+export const { useReplica: useTopics } = createReplica(topics, {
+  driver: createSWRDriver({ mutate, useSWR }),
+});
+
+function TopicList({ agentId }) {
+  const { data: topics } = useTopics({ agentId }); // the replica first, then the server
+  return <List items={topics} />;
+}
+```
+
+The object `createReplica` returns also carries `optimistic`, `remove`, `fetch`, `read(params)` and the other slice methods.
+
+### In your own store (`local-replica/zustand`)
+
+For apps that already keep server data in a store: the replica writes into a field you already read.
 
 ```ts
 import { definePagedReplica, KeyValueReplicaStorage } from 'local-replica';
