@@ -1,10 +1,41 @@
 ---
 title: Quick Start
-description: Define a paged replica, bind it to a Zustand store and sync it from a component.
+description: Swap one hook with useReplica, or bind a replica to your own store and sync it from a component.
 order: 4
 ---
 
-## Define a resource and bind it to the store
+## Without a store
+
+For apps that fetch with `useEffect` or plain SWR, `local-replica/react` swaps one hook:
+
+```tsx
+import { defineReplica, LocalStorageReplicaStorage } from 'local-replica';
+import { createReplica, createSWRDriver } from 'local-replica/react';
+import useSWR, { mutate } from 'swr';
+
+const topics = defineReplica({
+  name: 'topics',
+  version: 1,
+  key: ({ agentId }) => agentId,
+  fetcher: ({ agentId }) => api.getTopics(agentId), // your existing API
+  storage: (namespace) => new LocalStorageReplicaStorage({ namespace }),
+});
+
+export const { useReplica: useTopics } = createReplica(topics, {
+  driver: createSWRDriver({ mutate, useSWR }),
+});
+
+function TopicList({ agentId }) {
+  const { data: topics } = useTopics({ agentId }); // the replica first, then the server
+  return <List items={topics} />;
+}
+```
+
+The object `createReplica` returns also carries `optimistic`, `remove`, `fetch`, `read(params)` and the other slice methods.
+
+## In your own store
+
+For apps that already keep server data in a store, `local-replica/zustand` writes into a field you already read:
 
 ```ts
 import { definePagedReplica, KeyValueReplicaStorage } from 'local-replica';

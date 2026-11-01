@@ -133,18 +133,52 @@ local-replica 刻意**不做**离线写入队列、冲突合并（CRDT / OT）�
 npm i local-replica
 ```
 
-`react`（`useSync` 需要）和 `zustand` 是可选的 peer 依赖，只有 `local-replica/zustand` 需要它们。核心入口与框架无关。
+`react` 和 `zustand` 是可选的 peer 依赖：`local-replica/react` 需要 `react`，`local-replica/zustand` 两者都需要。两种绑定都通过 driver 调度请求，`createSWRDriver` 需要 `swr`。核心入口与框架无关。
 
 ## 分层
 
 | 入口                    | 职责                                                                                                                                                                 |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `local-replica`         | 核心引擎，与框架无关：资源定义、纯 reducer、分页（offset / cursor，向前 / 向后）、实体关联、串行化持久化、存储适配器（见[存储](#存储)）。                          |
+| `local-replica/react`   | 不需要自己的 store 的 React 绑定：`createReplica(resource, { driver })` 返回 `useReplica(params)` hook，像 `useSWR` 一样返回 `{ data, error, isHydrated, isValidating, revalidate }`，同时返回 slice 的各个方法（`optimistic`、`remove`、`fetch` 等）。 |
 | `local-replica/zustand` | Zustand 适配器：把资源绑定到领域 store 中的某个位置（`recordLens`）。提供 `useSync` hook，通过 `ReplicaSyncDriver` 调度请求（SWR 用 `createSWRDriver`）。          |
 
-宿主 store 始终是 UI 唯一的数据源，组件照常用 selector 读取 store。`useSync` 只返回请求状态（`isHydrated`、`isValidating`、`error`、`revalidate`），从不返回数据。
+使用 `local-replica/react` 时，hook 像 `useSWR` 一样直接返回数据，副本保存在它自己的 store 里。使用 `local-replica/zustand` 时，宿主 store 始终是 UI 唯一的数据源：组件照常用 selector 读取 store，`useSync` 只返回请求状态（`isHydrated`、`isValidating`、`error`、`revalidate`）。
 
 ## 快速开始
+
+### 不需要 store（`local-replica/react`）
+
+适合用 `useEffect` 或直接用 SWR 取数的应用：换掉一个 hook 即可。
+
+```tsx
+import { defineReplica, LocalStorageReplicaStorage } from 'local-replica';
+import { createReplica, createSWRDriver } from 'local-replica/react';
+import useSWR, { mutate } from 'swr';
+
+const topics = defineReplica({
+  name: 'topics',
+  version: 1,
+  key: ({ agentId }) => agentId,
+  fetcher: ({ agentId }) => api.getTopics(agentId), // 现有的 API
+  storage: (namespace) => new LocalStorageReplicaStorage({ namespace }),
+});
+
+export const { useReplica: useTopics } = createReplica(topics, {
+  driver: createSWRDriver({ mutate, useSWR }),
+});
+
+function TopicList({ agentId }) {
+  const { data: topics } = useTopics({ agentId }); // 先是副本，再是服务端的值
+  return <List items={topics} />;
+}
+```
+
+`createReplica` 返回的对象上还有 `optimistic`、`remove`、`fetch`、`read(params)` 等 slice 方法。
+
+### 接入已有的 store（`local-replica/zustand`）
+
+适合已经把服务端数据放进 store 的应用：副本直接写入你已经在读的字段。
 
 ```ts
 import { definePagedReplica, KeyValueReplicaStorage } from 'local-replica';
