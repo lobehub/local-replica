@@ -1,22 +1,32 @@
-import { Highlighter } from '@lobehub/ui';
+import { Highlighter, Segmented } from '@lobehub/ui';
+import { useState } from 'react';
 
 import styles from './write.module.css';
 
-const STEPS = [
-  {
-    code: `const topics = defineReplica({
+type Stack = 'effect' | 'swr' | 'swrStore';
+
+interface Step {
+  code: string;
+  description: string;
+  language: 'diff' | 'ts' | 'tsx';
+  title: string;
+}
+
+const DESCRIBE: Step = {
+  code: `const topics = defineReplica({
   name: 'topics',
   version: 1,
   key: ({ agentId }) => agentId,
   fetcher: ({ agentId }) => api.getTopics(agentId), // your existing API
   storage: (namespace) => new LocalStorageReplicaStorage({ namespace }),
 });`,
-    description: 'Name the data, point at the API you already call, and pick where the copy lives.',
-    language: 'ts',
-    title: 'Describe the data',
-  },
-  {
-    code: `const useStore = create(() => ({
+  description: 'Name the data, point at the API you already call, and pick where the copy lives.',
+  language: 'ts',
+  title: 'Describe the data',
+};
+
+const NEW_STORE: Step = {
+  code: `const useStore = create(() => ({
   topicsById: {}, // what components read
   topicsReplica: createReplicaState(), // bookkeeping
 }));
@@ -28,45 +38,189 @@ const topicsSlice = createReplicaSlice(topics, {
   stateKey: 'topicsReplica',
   view: recordLens('topicsById'),
 });`,
-    description:
-      'The replica writes into a field of your store, so the store stays the one place components read.',
-    language: 'ts',
-    title: 'Give it a slot in your store',
+  description:
+    'The replica writes into a small store, so every view that reads topics reads the same copy.',
+  language: 'ts',
+  title: 'Add a small store',
+};
+
+const STACKS: Record<Stack, { label: string; steps: Step[]; today: string; todayNote: string }> = {
+  effect: {
+    label: 'useEffect',
+    today: `function TopicList({ agentId }) {
+  const [topics, setTopics] = useState();
+  useEffect(() => {
+    let cancelled = false;
+    api.getTopics(agentId).then((data) => {
+      if (!cancelled) setTopics(data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId]);
+  return <List items={topics} />;
+}`,
+    todayNote: 'Fetch on mount, state in the component.',
+    steps: [
+      DESCRIBE,
+      NEW_STORE,
+      {
+        code: `  function TopicList({ agentId }) {
+-   const [topics, setTopics] = useState();
+-   useEffect(() => {
+-     let cancelled = false;
+-     api.getTopics(agentId).then((data) => {
+-       if (!cancelled) setTopics(data);
+-     });
+-     return () => {
+-       cancelled = true;
+-     };
+-   }, [agentId]);
++   topicsSlice.useSync({ agentId });
++   const topics = useStore((s) => s.topicsById[agentId]);
+    return <List items={topics} />;
+  }`,
+        description:
+          'The effect, the local state and the race guard go away. The list paints from the replica on the first frame, then syncs.',
+        language: 'diff',
+        title: 'Replace the effect',
+      },
+    ],
   },
-  {
-    code: `  function TopicList({ agentId }) {
+  swr: {
+    label: 'SWR',
+    today: `function TopicList({ agentId }) {
+  const { data: topics } = useSWR(['topics', agentId], () => api.getTopics(agentId));
+  return <List items={topics} />;
+}`,
+    todayNote: 'In-memory cache: instant on revisit, empty after a reload.',
+    steps: [
+      DESCRIBE,
+      NEW_STORE,
+      {
+        code: `  function TopicList({ agentId }) {
 -   const { data: topics } = useSWR(['topics', agentId], () => api.getTopics(agentId));
 +   topicsSlice.useSync({ agentId });
 +   const topics = useStore((s) => s.topicsById[agentId]);
     return <List items={topics} />;
   }`,
-    description:
-      'Paints from the replica on the first frame, then syncs. The rest of the component stays the same.',
-    language: 'diff',
-    title: 'Swap the hook',
+        description:
+          'SWR still schedules the requests underneath. The difference is a copy that survives reloads.',
+        language: 'diff',
+        title: 'Swap the hook',
+      },
+    ],
   },
-];
+  swrStore: {
+    label: 'SWR + store',
+    today: `const useStore = create(() => ({ topicsById: {} }));
+
+const useFetchTopics = (agentId) =>
+  useSWR(['topics', agentId], () => api.getTopics(agentId), {
+    onSuccess: (data) =>
+      useStore.setState((s) => ({ topicsById: { ...s.topicsById, [agentId]: data } })),
+  });
+
+function TopicList({ agentId }) {
+  useFetchTopics(agentId);
+  const topics = useStore((s) => s.topicsById[agentId]);
+  return <List items={topics} />;
+}`,
+    todayNote: 'SWR fetches, onSuccess copies the result into the store, components read the store.',
+    steps: [
+      DESCRIBE,
+      {
+        code: `  const useStore = create(() => ({
+    topicsById: {},
++   topicsReplica: createReplicaState(),
+  }));
+
++ const topicsSlice = createReplicaSlice(topics, {
++   driver: createSWRDriver({ mutate, useSWR }),
++   get: useStore.getState,
++   set: useStore.setState,
++   stateKey: 'topicsReplica',
++   view: recordLens('topicsById'), // the field you already read
++ });`,
+        description:
+          'One bookkeeping field next to the data you already keep. The replica writes into topicsById for you.',
+        language: 'diff',
+        title: 'Bind it to your store',
+      },
+      {
+        code: `- const useFetchTopics = (agentId) =>
+-   useSWR(['topics', agentId], () => api.getTopics(agentId), {
+-     onSuccess: (data) =>
+-       useStore.setState((s) => ({ topicsById: { ...s.topicsById, [agentId]: data } })),
+-   });
+
+  function TopicList({ agentId }) {
+-   useFetchTopics(agentId);
++   topicsSlice.useSync({ agentId });
+    const topics = useStore((s) => s.topicsById[agentId]);
+    return <List items={topics} />;
+  }`,
+        description:
+          'The hand-written onSuccess goes away. Selectors and components stay exactly as they are.',
+        language: 'diff',
+        title: 'Replace the fetch hook',
+      },
+    ],
+  },
+};
+
+function StepRow({ code, description, index, language, title }: Step & { index?: number }) {
+  return (
+    <li className={styles.step}>
+      <div className={styles.text}>
+        {index === undefined ? (
+          <span className={styles.today}>Today</span>
+        ) : (
+          <span className={styles.number}>{index}</span>
+        )}
+        <div className={styles.title}>{title}</div>
+        <div className={styles.description}>{description}</div>
+      </div>
+      <Highlighter
+        className={index === undefined ? `${styles.code} ${styles.todayCode}` : styles.code}
+        language={language}
+        style={{ fontSize: 13 }}
+        variant={'filled'}
+      >
+        {code}
+      </Highlighter>
+    </li>
+  );
+}
 
 export function WriteSteps() {
+  const [stack, setStack] = useState<Stack>('swr');
+  const current = STACKS[stack];
+
   return (
-    <ol className={styles.steps}>
-      {STEPS.map((step, index) => (
-        <li className={styles.step} key={step.title}>
-          <div className={styles.text}>
-            <span className={styles.number}>{index + 1}</span>
-            <div className={styles.title}>{step.title}</div>
-            <div className={styles.description}>{step.description}</div>
-          </div>
-          <Highlighter
-            className={styles.code}
-            language={step.language}
-            style={{ fontSize: 13 }}
-            variant={'filled'}
-          >
-            {step.code}
-          </Highlighter>
-        </li>
-      ))}
-    </ol>
+    <div className={styles.root}>
+      <div className={styles.switcher}>
+        <span className={styles.switcherLabel}>What do you use today?</span>
+        <Segmented
+          options={(Object.keys(STACKS) as Stack[]).map((value) => ({
+            label: STACKS[value].label,
+            value,
+          }))}
+          value={stack}
+          onChange={(value) => setStack(value as Stack)}
+        />
+      </div>
+      <ol className={styles.steps}>
+        <StepRow
+          code={current.today}
+          description={current.todayNote}
+          language="tsx"
+          title={`With ${current.label}`}
+        />
+        {current.steps.map((step, index) => (
+          <StepRow index={index + 1} key={`${stack}-${step.title}`} {...step} />
+        ))}
+      </ol>
+    </div>
   );
 }

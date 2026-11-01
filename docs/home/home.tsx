@@ -160,7 +160,7 @@ export default function Home({
       </LandingSection>
 
       <LandingSection
-        description="Three steps on top of what you already have. The fetcher is your existing API, and components keep reading from your store."
+        description="Pick what you use today and see what changes. Your existing API stays the fetcher in every case."
         eyebrow="Code"
         eyebrowColor="green"
         id="home-code"

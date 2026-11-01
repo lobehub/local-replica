@@ -1,3 +1,39 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+}
+
+.switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.switcherLabel {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--lobe-color-text-secondary);
+}
+
+.today {
+  align-self: flex-start;
+
+  margin-block-end: 4px;
+  padding: 1px 8px;
+  border: 1px solid var(--lobe-color-border);
+  border-radius: 999px;
+
+  font-size: 12px;
+  color: var(--lobe-color-text-tertiary);
+}
+
+.todayCode {
+  opacity: 0.75;
+}
+
 .steps {
   display: flex;
   flex-direction: column;
