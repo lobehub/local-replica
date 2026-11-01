@@ -2,6 +2,19 @@
 
 # Changelog
 
+# [0.2.0](https://github.com/lobehub/local-replica/compare/v0.1.1...v0.2.0) (2026-11-01)
+
+
+### ✨ Features
+
+* **docs**: Compare useEffect, SWR and local-replica on the home page, closes [#11](https://github.com/lobehub/local-replica/issues/11) ([80135aa](https://github.com/lobehub/local-replica/commit/80135aa))
+* **react**: Add createReplica, a store-less useReplica hook, closes [#13](https://github.com/lobehub/local-replica/issues/13) ([79354c0](https://github.com/lobehub/local-replica/commit/79354c0))
+
+
+### 🐛 Bug Fixes
+
+* **zustand**: Infer the store from get / set and accept SWR's mutate as is, closes [#12](https://github.com/lobehub/local-replica/issues/12) ([d372342](https://github.com/lobehub/local-replica/commit/d372342))
+
 ## [0.1.1](https://github.com/lobehub/local-replica/compare/v0.1.0...v0.1.1) (2026-10-28)
 
 
