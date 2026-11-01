@@ -25,23 +25,14 @@ const DESCRIBE: Step = {
   title: 'Describe the data',
 };
 
-const NEW_STORE: Step = {
-  code: `const useStore = create(() => ({
-  topicsById: {}, // what components read
-  topicsReplica: createReplicaState(), // bookkeeping
-}));
-
-const topicsSlice = createReplicaSlice(topics, {
-  driver: createSWRDriver({ mutate, useSWR }),
-  get: useStore.getState,
-  set: useStore.setState,
-  stateKey: 'topicsReplica',
-  view: recordLens('topicsById'),
+const CREATE_HOOK: Step = {
+  code: `export const { useReplica: useTopics } = createReplica(topics, {
+  driver: createSWRDriver({ mutate, useSWR }), // SWR schedules the requests
 });`,
   description:
-    'The replica writes into a small store, so every view that reads topics reads the same copy.',
+    'No store to add: the hook keeps the replica for you and returns the data, like useSWR.',
   language: 'ts',
-  title: 'Add a small store',
+  title: 'Create the hook',
 };
 
 const STACKS: Record<Stack, { label: string; steps: Step[]; today: string; todayNote: string }> = {
@@ -63,7 +54,7 @@ const STACKS: Record<Stack, { label: string; steps: Step[]; today: string; today
     todayNote: 'Fetch on mount, state in the component.',
     steps: [
       DESCRIBE,
-      NEW_STORE,
+      CREATE_HOOK,
       {
         code: `  function TopicList({ agentId }) {
 -   const [topics, setTopics] = useState();
@@ -76,12 +67,11 @@ const STACKS: Record<Stack, { label: string; steps: Step[]; today: string; today
 -       cancelled = true;
 -     };
 -   }, [agentId]);
-+   topicsSlice.useSync({ agentId });
-+   const topics = useStore((s) => s.topicsById[agentId]);
++   const { data: topics } = useTopics({ agentId });
     return <List items={topics} />;
   }`,
         description:
-          'The effect, the local state and the race guard go away. The list paints from the replica on the first frame, then syncs.',
+          'The effect, the local state and the race guard collapse into one hook. The list paints from the replica on the first frame, then syncs.',
         language: 'diff',
         title: 'Replace the effect',
       },
@@ -96,16 +86,15 @@ const STACKS: Record<Stack, { label: string; steps: Step[]; today: string; today
     todayNote: 'In-memory cache: instant on revisit, empty after a reload.',
     steps: [
       DESCRIBE,
-      NEW_STORE,
+      CREATE_HOOK,
       {
         code: `  function TopicList({ agentId }) {
 -   const { data: topics } = useSWR(['topics', agentId], () => api.getTopics(agentId));
-+   topicsSlice.useSync({ agentId });
-+   const topics = useStore((s) => s.topicsById[agentId]);
++   const { data: topics } = useTopics({ agentId });
     return <List items={topics} />;
   }`,
         description:
-          'SWR still schedules the requests underneath. The difference is a copy that survives reloads.',
+          'Same shape as useSWR: data, error, isValidating. The difference is a copy that survives reloads.',
         language: 'diff',
         title: 'Swap the hook',
       },
