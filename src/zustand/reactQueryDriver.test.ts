@@ -321,6 +321,36 @@ describe('createReactQueryDriver', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it('reports a shared key once when two hooks of one replica mount together', async () => {
+    const { fetcher, replica, wrapper } = setup();
+    const first = vi.fn();
+    const second = vi.fn();
+
+    renderHook(() => replica.useReplica({ id: 'a' }, { onSuccess: first }), { wrapper });
+    renderHook(() => replica.useReplica({ id: 'a' }, { onSuccess: second }), { wrapper });
+
+    await waitFor(() => expect(first).toHaveBeenCalledExactlyOnceWith(['server a']));
+    expect(second).not.toHaveBeenCalled();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('settles a cached result as the undefined the fetcher returned', async () => {
+    const { first, second, wrapper } = sharedSetup(
+      vi.fn(async (_: { id: string }) => undefined as unknown as string[]),
+    );
+
+    const firstDone = vi.fn();
+    renderHook(() => first.useReplica({ id: 'a' }, { onSuccess: firstDone }), { wrapper });
+    await waitFor(() => expect(firstDone).toHaveBeenCalledExactlyOnceWith(undefined));
+
+    const secondDone = vi.fn();
+    renderHook(
+      () => second.useReplica({ id: 'a' }, { onSuccess: secondDone, revalidateIfStale: false }),
+      { wrapper },
+    );
+    await waitFor(() => expect(secondDone).toHaveBeenCalledExactlyOnceWith(undefined));
+  });
+
   describe('options', () => {
     const capture = () => {
       const result = { data: undefined, error: null, isFetching: false, refetch: vi.fn() };

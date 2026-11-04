@@ -228,11 +228,19 @@ export const createReactQueryDriver = ({
       // the same one report nothing.
       useLayoutEffect(() => {
         const dataAt = result.dataUpdatedAt ?? 0;
-        if (key === null || ranOwnQuery.current) return;
+        if (key === null) return;
+        if (ranOwnQuery.current) {
+          // Its own run reported this one: record it so a sibling hook of the
+          // same key does not fold the same result again.
+          if (dataAt !== 0) deliveredData.set(hash, dataAt);
+          return;
+        }
         if (dataAt === 0 || dataAt === seen.current || deliveredData.get(hash) === dataAt) return;
         seen.current = dataAt;
         deliveredData.set(hash, dataAt);
-        callbacks.current?.onSuccess?.(result.data as T);
+        // The query function hands TanStack `null` for an `undefined` response;
+        // the callback gets what the fetcher returned.
+        callbacks.current?.onSuccess?.((result.data === null ? undefined : result.data) as T);
       });
 
       return {
