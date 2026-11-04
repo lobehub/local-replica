@@ -23,8 +23,6 @@ export type ReactQueryLikeHook = (options: any) => {
   /** When the cached data last changed; `0` when the query holds none. */
   dataUpdatedAt?: number;
   error: unknown;
-  /** When the cached error last changed; `0` when the query holds none. */
-  errorUpdatedAt?: number;
   isFetching: boolean;
   refetch: () => Promise<unknown>;
 };
@@ -105,12 +103,10 @@ export const createReactQueryDriver = ({
   let hooks = 0;
 
   /**
-   * Settlement each key last reported off the cached result: `dataUpdatedAt` /
-   * `errorUpdatedAt`. One result reports once per key and driver, however many
-   * hooks of that key are mounted.
+   * `dataUpdatedAt` of the result each key last reported off the cache, so a
+   * re-render of the same settlement reports nothing.
    */
   const deliveredData = new Map<string, number>();
-  const deliveredError = new Map<string, number>();
 
   /** Take or release one hook's hold on a key; a key is held while its set is not empty. */
   const holdPause = (pauseKey: string, hook: number, paused: boolean) => {
@@ -192,8 +188,8 @@ export const createReactQueryDriver = ({
        * when the hook switches keys.
        */
       const ranOwnQuery = useRef(false);
-      // Settlement this hook last read off the cached result (see the watch).
-      const seen = useRef<{ data: number; error: number } | null>(null);
+      // `dataUpdatedAt` this hook last settled on (see the watch below).
+      const seen = useRef(0);
 
       const result = useQuery({
         enabled: key !== null && armed && !schedule.isPaused?.(),
@@ -228,23 +224,15 @@ export const createReactQueryDriver = ({
       // with another replica over the same `QueryClient` (TanStack dedupes the
       // fetch), or a cache still holding the value when this hook mounted. The
       // hook still has to settle it, or its view stays empty while the query
-      // succeeded. `dataUpdatedAt` / `errorUpdatedAt` identify the settlement,
-      // and the driver reports each one once per key.
+      // succeeded. `dataUpdatedAt` identifies the settlement, so re-renders of
+      // the same one report nothing.
       useLayoutEffect(() => {
         const dataAt = result.dataUpdatedAt ?? 0;
-        const errorAt = result.errorUpdatedAt ?? 0;
-        const last = seen.current;
-        seen.current = { data: dataAt, error: errorAt };
         if (key === null || ranOwnQuery.current) return;
-        if (dataAt !== 0 && dataAt !== last?.data && deliveredData.get(hash) !== dataAt) {
-          deliveredData.set(hash, dataAt);
-          callbacks.current?.onSuccess?.(result.data as T);
-          return;
-        }
-        if (errorAt !== 0 && errorAt !== last?.error && deliveredError.get(hash) !== errorAt) {
-          deliveredError.set(hash, errorAt);
-          callbacks.current?.onError?.(result.error);
-        }
+        if (dataAt === 0 || dataAt === seen.current || deliveredData.get(hash) === dataAt) return;
+        seen.current = dataAt;
+        deliveredData.set(hash, dataAt);
+        callbacks.current?.onSuccess?.(result.data as T);
       });
 
       return {

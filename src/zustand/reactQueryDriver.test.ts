@@ -44,6 +44,35 @@ const setup = (fetcher = vi.fn(async ({ id }: { id: string }) => [`server ${id}`
   return { fetcher, queryClient, replica, storage, wrapper };
 };
 
+/**
+ * Two replicas over one `QueryClient`: their sync queries share one cache
+ * entry, so only one of them runs the fetch.
+ */
+const sharedSetup = (
+  fetcher = vi.fn(async ({ id }: { id: string }) => [`server ${id}`]),
+) => {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { gcTime: Infinity, retry: false } },
+  });
+  const resourceOf = () =>
+    defineReplica<{ id: string }, string[]>({
+      fetcher,
+      key: ({ id }) => id,
+      name: 'rqShared',
+      scope,
+      storage: createMemoryStorage().storage,
+      version: 1,
+    });
+  const driver = () => createReactQueryDriver({ queryClient, useQuery });
+  return {
+    fetcher,
+    first: createReplica(resourceOf(), { driver: driver() }),
+    second: createReplica(resourceOf(), { driver: driver() }),
+    wrapper: ({ children }: PropsWithChildren) =>
+      createElement(QueryClientProvider, { client: queryClient }, children),
+  };
+};
+
 describe('createReactQueryDriver', () => {
   it('paints the persisted row, then the server value, and persists it', async () => {
     const request = deferred<string[]>();
@@ -269,24 +298,7 @@ describe('createReactQueryDriver', () => {
   });
 
   it('settles a hook whose replica shares the query a second instance fetched', async () => {
-    const fetcher = vi.fn(async ({ id }: { id: string }) => [`server ${id}`]);
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { gcTime: Infinity, retry: false } },
-    });
-    const resourceOf = () =>
-      defineReplica<{ id: string }, string[]>({
-        fetcher,
-        key: ({ id }) => id,
-        name: 'rqShared',
-        scope,
-        storage: createMemoryStorage().storage,
-        version: 1,
-      });
-    const driver = () => createReactQueryDriver({ queryClient, useQuery });
-    const first = createReplica(resourceOf(), { driver: driver() });
-    const second = createReplica(resourceOf(), { driver: driver() });
-    const wrapper = ({ children }: PropsWithChildren) =>
-      createElement(QueryClientProvider, { client: queryClient }, children);
+    const { fetcher, first, second, wrapper } = sharedSetup();
 
     const firstDone = vi.fn();
     const { result: a } = renderHook(
