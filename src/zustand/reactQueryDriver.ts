@@ -88,12 +88,21 @@ export const createReactQueryDriver = ({
   let runs = 0;
 
   /**
-   * Hooks whose key is paused right now, by sync key. `isPaused` holds *every*
-   * request, so the two explicit paths — `mutate` and this driver's `revalidate`
-   * — have to read it too, and only a render knows the current value.
+   * Hooks paused on each sync key. `isPaused` holds *every* request, so the two
+   * explicit paths — `mutate` and this driver's `revalidate` — have to read it
+   * too, and only a render knows the current value.
    */
   const pausedHooks = new Map<string, Set<number>>();
   let hooks = 0;
+
+  /** Take or release one hook's hold on a key; a key is held while its set is not empty. */
+  const holdPause = (pauseKey: string, hook: number, paused: boolean) => {
+    const pausedSet = pausedHooks.get(pauseKey) ?? new Set<number>();
+    if (paused) pausedSet.add(hook);
+    else pausedSet.delete(hook);
+    if (pausedSet.size > 0) pausedHooks.set(pauseKey, pausedSet);
+    else pausedHooks.delete(pauseKey);
+  };
 
   return {
     // Every mounted query whose key matches, also one `enabled` still holds back.
@@ -130,41 +139,26 @@ export const createReactQueryDriver = ({
       // a key shared by several hooks stays paused while any one of them is.
       const hook = useRef(0);
       if (hook.current === 0) hook.current = ++hooks;
-      const pausedKey = useRef<string | null>(null);
+      // The key this hook currently holds a pause under, if any.
+      const pausedIn = useRef<string | null>(null);
       const hash = JSON.stringify(key);
       const paused = key !== null && (schedule.isPaused?.() ?? false);
       useLayoutEffect(() => {
         callbacks.current = { onError, onSuccess };
         activeKey.current = hash;
-        // The hook moved to another key: release the pause it registered under.
-        if (pausedKey.current !== null && pausedKey.current !== hash) {
-          const previous = pausedHooks.get(pausedKey.current);
-          previous?.delete(hook.current);
-          if (previous?.size === 0) pausedHooks.delete(pausedKey.current);
-          pausedKey.current = null;
-        }
-        if (paused) {
-          const pausedSet = pausedHooks.get(hash);
-          if (pausedSet) pausedSet.add(hook.current);
-          else pausedHooks.set(hash, new Set([hook.current]));
-          pausedKey.current = hash;
-        } else if (pausedKey.current === hash) {
-          const pausedSet = pausedHooks.get(hash);
-          pausedSet?.delete(hook.current);
-          if (pausedSet?.size === 0) pausedHooks.delete(hash);
-          pausedKey.current = null;
-        }
+        const previous = pausedIn.current;
+        pausedIn.current = paused ? hash : null;
+        // The hook switched keys: keep no hold on the one it left.
+        if (previous !== null && previous !== hash) holdPause(previous, hook.current, false);
+        holdPause(hash, hook.current, paused);
       });
       useEffect(
         () => () => {
           callbacks.current = null;
           activeKey.current = null;
-          pausedKey.current = null;
-          // Drop this hook from every pause set it may have registered under.
-          for (const [pausedStorageKey, pausedSet] of pausedHooks) {
-            if (!pausedSet.delete(hook.current)) continue;
-            if (pausedSet.size === 0) pausedHooks.delete(pausedStorageKey);
-          }
+          const previous = pausedIn.current;
+          pausedIn.current = null;
+          if (previous !== null) holdPause(previous, hook.current, false);
         },
         [],
       );
@@ -205,6 +199,9 @@ export const createReactQueryDriver = ({
         isValidating: result.isFetching,
         mutate: () => {
           setArmed(true);
+          // No key: there is nothing to fetch, and a manual refetch would run the
+          // disabled query's fetcher with the null params the caller passed.
+          if (key === null) return Promise.resolve(result.data);
           // `isPaused` holds every request, this one included: arming is enough,
           // the next render without a pause runs it. TanStack lets a manual
           // refetch of a disabled query through, so this path must check too.

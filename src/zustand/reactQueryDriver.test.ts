@@ -195,6 +195,38 @@ describe('createReactQueryDriver', () => {
     expect(fetcher).toHaveBeenLastCalledWith({ id: 'b' }, undefined);
   });
 
+  it('moves the pause to the new key when the key changes while paused', async () => {
+    const { fetcher, replica, wrapper } = setup();
+    let paused = true;
+
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string }) => replica.useReplica({ id }, { isPaused: () => paused }),
+      { initialProps: { id: 'a' }, wrapper },
+    );
+    rerender({ id: 'b' });
+    expect(fetcher).not.toHaveBeenCalled();
+
+    paused = false;
+    rerender({ id: 'b' });
+
+    await waitFor(() => expect(result.current.data).toEqual(['server b']));
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith({ id: 'b' }, undefined);
+  });
+
+  it('releases the pause left behind by an unmounted hook', async () => {
+    const { fetcher, replica, wrapper } = setup();
+    const paused = renderHook(() => replica.useReplica({ id: 'a' }, { isPaused: () => true }), {
+      wrapper,
+    });
+    await waitFor(() => expect(paused.result.current.isHydrated).toBe(true));
+    paused.unmount();
+
+    const live = renderHook(() => replica.useReplica({ id: 'a' }), { wrapper });
+
+    await waitFor(() => expect(live.result.current.data).toEqual(['server a']));
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith({ id: 'a' }, undefined);
+  });
+
   it('re-runs mounted queries only on revalidate', async () => {
     const { fetcher, replica, wrapper } = setup();
     const { unmount } = renderHook(() => replica.useReplica({ id: 'a' }), { wrapper });
@@ -295,12 +327,16 @@ describe('createReactQueryDriver', () => {
     });
 
     it('disables a query without a key, and reports no error as undefined', () => {
-      const { driver, options } = capture();
+      const { driver, options, result: query } = capture();
 
       const { result } = renderHook(() => driver.useQuery(null, async () => 1, {}));
 
       expect(options()).toMatchObject({ enabled: false, queryKey: ['local-replica', 'disabled'] });
       expect(result.current.error).toBeUndefined();
+
+      // A manual refetch would run the fetcher with the null params it was given.
+      act(() => void result.current.mutate());
+      expect(query.refetch).not.toHaveBeenCalled();
     });
 
     it('returns null for undefined data, and arms the query on mutate', async () => {
