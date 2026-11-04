@@ -8,9 +8,10 @@ export interface ReplicaSyncSchedule {
   /** Skip focus revalidation while the last one is younger than this (ms). */
   focusThrottleInterval?: number;
   /**
-   * Hold every network request (mount, stale, focus, revalidate) while it
-   * returns `true`, for a read whose input outside the sync key is not ready
-   * yet. Unlike `revalidateOnMount: false` it also covers a later key change.
+   * Hold every network request (mount, stale, focus, an explicit `revalidate`
+   * or `mutate`) while it returns `true`, for a read whose input outside the
+   * sync key is not ready yet. Unlike `revalidateOnMount: false` it also covers
+   * a later key change, and it holds the explicit calls, not just the schedule.
    * Read on each request, so it may close over a ref.
    */
   isPaused?: () => boolean;

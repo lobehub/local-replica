@@ -159,6 +159,42 @@ describe('createReactQueryDriver', () => {
     await waitFor(() => expect(result.current.data).toEqual(['server b']));
   });
 
+  it('holds an explicit revalidate while paused, and runs it once the pause lifts', async () => {
+    const { fetcher, replica, wrapper } = setup();
+    let paused = true;
+
+    const { result, rerender } = renderHook(
+      () => replica.useReplica({ id: 'a' }, { isPaused: () => paused }),
+      { wrapper },
+    );
+
+    await act(async () => {
+      await result.current.revalidate();
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+
+    paused = false;
+    rerender();
+
+    await waitFor(() => expect(result.current.data).toEqual(['server a']));
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith({ id: 'a' }, undefined);
+  });
+
+  it('leaves a paused query out of a driver revalidate', async () => {
+    const { fetcher, replica, wrapper } = setup();
+    renderHook(() => replica.useReplica({ id: 'a' }, { isPaused: () => true }), { wrapper });
+    const live = renderHook(() => replica.useReplica({ id: 'b' }), { wrapper });
+    await waitFor(() => expect(live.result.current.data).toEqual(['server b']));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await replica.revalidate();
+    });
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenLastCalledWith({ id: 'b' }, undefined);
+  });
+
   it('re-runs mounted queries only on revalidate', async () => {
     const { fetcher, replica, wrapper } = setup();
     const { unmount } = renderHook(() => replica.useReplica({ id: 'a' }), { wrapper });
@@ -281,6 +317,27 @@ describe('createReactQueryDriver', () => {
 
       act(() => void result.current.mutate());
       expect(query.refetch).toHaveBeenCalledOnce();
+      expect(options().enabled).toBe(true);
+    });
+
+    it('does not refetch a paused query on mutate, and arms it for when the pause lifts', () => {
+      const { driver, options, result: query } = capture();
+      let paused = true;
+
+      const { result, rerender } = renderHook(() =>
+        driver.useQuery(['k'], async () => 1, { isPaused: () => paused, revalidateOnMount: false }),
+      );
+      expect(options().enabled).toBe(false);
+
+      act(() => void result.current.mutate());
+
+      expect(query.refetch).not.toHaveBeenCalled();
+      // Armed, but `isPaused` still holds the request.
+      expect(options().enabled).toBe(false);
+
+      paused = false;
+      rerender();
+
       expect(options().enabled).toBe(true);
     });
 
