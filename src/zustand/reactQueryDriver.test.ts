@@ -92,6 +92,30 @@ describe('createReactQueryDriver', () => {
     expect(onSuccess.mock.calls).toEqual([[['first']], [['newer']]]);
   });
 
+  it('drops a request that lands after the hook switched to another key', async () => {
+    const requests = { a: deferred<string[]>(), b: deferred<string[]>() };
+    const fetcher = vi.fn(({ id }: { id: string }) => requests[id as 'a' | 'b'].promise);
+    const { replica, wrapper } = setup(fetcher);
+    const onSuccess = vi.fn();
+
+    const { rerender } = renderHook(
+      ({ id }: { id: string }) => replica.useReplica({ id }, { onSuccess }),
+      { initialProps: { id: 'a' }, wrapper },
+    );
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+
+    // The same hook now shows `b` while `a` is still fetching.
+    rerender({ id: 'b' });
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+
+    await act(async () => requests.a.resolve(['a-row']));
+    // `a` settled after the switch: its data must not reach the `b` render.
+    expect(onSuccess).not.toHaveBeenCalled();
+
+    await act(async () => requests.b.resolve(['b-row']));
+    await waitFor(() => expect(onSuccess.mock.calls).toEqual([[['b-row']]]));
+  });
+
   it('reports a failure to onError and keeps the value on screen', async () => {
     const failure = new Error('offline');
     const { replica, storage, wrapper } = setup(

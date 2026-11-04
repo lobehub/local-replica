@@ -109,18 +109,23 @@ export const createReactQueryDriver = ({
       const callbacks = useRef<Pick<ReplicaQueryOptions<T>, 'onError' | 'onSuccess'> | null>(
         null,
       );
+      // The key this render shows. A request in flight keeps the key it started
+      // with, so a hook that switched keys must not settle the newer one.
+      const activeKey = useRef<string | null>(null);
+      const hash = JSON.stringify(key);
       useLayoutEffect(() => {
         callbacks.current = { onError, onSuccess };
+        activeKey.current = hash;
       });
       useEffect(
         () => () => {
           callbacks.current = null;
+          activeKey.current = null;
         },
         [],
       );
       // `revalidateOnMount: false` holds the first request until `mutate`.
       const [armed, setArmed] = useState(schedule.revalidateOnMount !== false);
-      const hash = JSON.stringify(key);
 
       const result = useQuery({
         enabled: key !== null && armed && !schedule.isPaused?.(),
@@ -130,6 +135,9 @@ export const createReactQueryDriver = ({
           const report = () => {
             if (latestRun.get(hash) !== run) return undefined;
             latestRun.delete(hash);
+            // The hook moved to another key while this ran: drop the result
+            // rather than deliver it to the render that replaced it.
+            if (activeKey.current !== hash) return undefined;
             return callbacks.current;
           };
           let data: T;
