@@ -20,7 +20,11 @@ export interface ReactQueryLikeClient {
 /** TanStack Query's `useQuery` (v5). */
 export type ReactQueryLikeHook = (options: any) => {
   data?: any;
+  /** When the cached data last changed; `0` when the query holds none. */
+  dataUpdatedAt?: number;
   error: unknown;
+  /** When the cached error last changed; `0` when the query holds none. */
+  errorUpdatedAt?: number;
   isFetching: boolean;
   refetch: () => Promise<unknown>;
 };
@@ -75,6 +79,11 @@ const toQueryOptions = (
  * request of a key, and only while the hook is mounted. An overtaken request
  * still settles on its own response (the slice does that); reporting it again
  * would pair it with the newer request.
+ *
+ * A key can be shared: two replicas over one `QueryClient` dedupe to a single
+ * query, and a hook can mount on a result still in the cache. A hook that did
+ * not run the query function for the key it shows still settles on the cached
+ * result, once per settlement and driver.
  */
 export const createReactQueryDriver = ({
   queryClient,
@@ -94,6 +103,14 @@ export const createReactQueryDriver = ({
    */
   const pausedHooks = new Map<string, Set<number>>();
   let hooks = 0;
+
+  /**
+   * Settlement each key last reported off the cached result: `dataUpdatedAt` /
+   * `errorUpdatedAt`. One result reports once per key and driver, however many
+   * hooks of that key are mounted.
+   */
+  const deliveredData = new Map<string, number>();
+  const deliveredError = new Map<string, number>();
 
   /** Take or release one hook's hold on a key; a key is held while its set is not empty. */
   const holdPause = (pauseKey: string, hook: number, paused: boolean) => {
@@ -145,6 +162,9 @@ export const createReactQueryDriver = ({
       const paused = key !== null && (schedule.isPaused?.() ?? false);
       useLayoutEffect(() => {
         callbacks.current = { onError, onSuccess };
+        // A different key: this hook has not run that key's query yet, so a
+        // result cached under it is one it still has to settle (see the watch).
+        if (activeKey.current !== hash) ranOwnQuery.current = false;
         activeKey.current = hash;
         const previous = pausedIn.current;
         pausedIn.current = paused ? hash : null;
@@ -164,11 +184,22 @@ export const createReactQueryDriver = ({
       );
       // `revalidateOnMount: false` holds the first request until `mutate`.
       const [armed, setArmed] = useState(schedule.revalidateOnMount !== false);
+      /**
+       * Whether this hook itself ran the query function for the key it shows.
+       * Its own run reports the settlement; the cache watch below is for
+       * results that arrived without it — a key another replica already fetched
+       * over the shared `QueryClient`, or a value still cached on mount. Reset
+       * when the hook switches keys.
+       */
+      const ranOwnQuery = useRef(false);
+      // Settlement this hook last read off the cached result (see the watch).
+      const seen = useRef<{ data: number; error: number } | null>(null);
 
       const result = useQuery({
         enabled: key !== null && armed && !schedule.isPaused?.(),
         queryFn: async () => {
           const run = ++runs;
+          ranOwnQuery.current = true;
           latestRun.set(hash, run);
           const report = () => {
             if (latestRun.get(hash) !== run) return undefined;
@@ -191,6 +222,29 @@ export const createReactQueryDriver = ({
         },
         queryKey: key ?? DISABLED_KEY,
         ...toQueryOptions(schedule, once),
+      });
+
+      // A result this hook's own query function did not produce: a key shared
+      // with another replica over the same `QueryClient` (TanStack dedupes the
+      // fetch), or a cache still holding the value when this hook mounted. The
+      // hook still has to settle it, or its view stays empty while the query
+      // succeeded. `dataUpdatedAt` / `errorUpdatedAt` identify the settlement,
+      // and the driver reports each one once per key.
+      useLayoutEffect(() => {
+        const dataAt = result.dataUpdatedAt ?? 0;
+        const errorAt = result.errorUpdatedAt ?? 0;
+        const last = seen.current;
+        seen.current = { data: dataAt, error: errorAt };
+        if (key === null || ranOwnQuery.current) return;
+        if (dataAt !== 0 && dataAt !== last?.data && deliveredData.get(hash) !== dataAt) {
+          deliveredData.set(hash, dataAt);
+          callbacks.current?.onSuccess?.(result.data as T);
+          return;
+        }
+        if (errorAt !== 0 && errorAt !== last?.error && deliveredError.get(hash) !== errorAt) {
+          deliveredError.set(hash, errorAt);
+          callbacks.current?.onError?.(result.error);
+        }
       });
 
       return {

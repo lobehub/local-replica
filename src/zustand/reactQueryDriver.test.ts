@@ -268,6 +268,47 @@ describe('createReactQueryDriver', () => {
     expect(seed).toHaveBeenCalledWith(expect.any(Array), ['server a']);
   });
 
+  it('settles a hook whose replica shares the query a second instance fetched', async () => {
+    const fetcher = vi.fn(async ({ id }: { id: string }) => [`server ${id}`]);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { gcTime: Infinity, retry: false } },
+    });
+    const resourceOf = () =>
+      defineReplica<{ id: string }, string[]>({
+        fetcher,
+        key: ({ id }) => id,
+        name: 'rqShared',
+        scope,
+        storage: createMemoryStorage().storage,
+        version: 1,
+      });
+    const driver = () => createReactQueryDriver({ queryClient, useQuery });
+    const first = createReplica(resourceOf(), { driver: driver() });
+    const second = createReplica(resourceOf(), { driver: driver() });
+    const wrapper = ({ children }: PropsWithChildren) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+
+    const firstDone = vi.fn();
+    const { result: a } = renderHook(
+      () => first.useReplica({ id: 'a' }, { onSuccess: firstDone }),
+      { wrapper },
+    );
+    await waitFor(() => expect(a.current.data).toEqual(['server a']));
+    expect(firstDone).toHaveBeenCalledExactlyOnceWith(['server a']);
+
+    // The second replica shares the client, so its query joins the first one's
+    // fetch instead of running its own: it still has to settle on the result.
+    const secondDone = vi.fn();
+    const { result: b } = renderHook(
+      () => second.useReplica({ id: 'a' }, { onSuccess: secondDone, revalidateIfStale: false }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(b.current.data).toEqual(['server a']));
+    expect(secondDone).toHaveBeenCalledExactlyOnceWith(['server a']);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   describe('options', () => {
     const capture = () => {
       const result = { data: undefined, error: null, isFetching: false, refetch: vi.fn() };
