@@ -23,6 +23,8 @@ export type ReactQueryLikeHook = (options: any) => {
   /** When the cached data last changed; `0` when the query holds none. */
   dataUpdatedAt?: number;
   error: unknown;
+  /** When the cached failure last changed; `0` when the query holds none. */
+  errorUpdatedAt?: number;
   isFetching: boolean;
   refetch: () => Promise<unknown>;
 };
@@ -115,6 +117,14 @@ export const createReactQueryDriver = ({
    */
   const deliveredData = new Map<string, number>();
 
+  /**
+   * `errorUpdatedAt` of the failure each key last reported off the cache, the
+   * error-side twin of `deliveredData`: a sibling hook — in another driver over
+   * the same `QueryClient` — still has to settle a failure whose `queryFn` only
+   * the executing hook ran, and must settle it once.
+   */
+  const deliveredError = new Map<string, number>();
+
   /** Hooks currently showing each key; the last one to leave ends its activation. */
   const activeKeyHooks = new Map<string, Set<number>>();
 
@@ -139,6 +149,7 @@ export const createReactQueryDriver = ({
     // Nothing shows this key any more: its delivery is neither on screen nor
     // pending, so a later activation starts from the cache again.
     deliveredData.delete(keyHash);
+    deliveredError.delete(keyHash);
   };
 
   /** Take or release one hook's hold on a key; a key is held while its set is not empty. */
@@ -204,6 +215,8 @@ export const createReactQueryDriver = ({
         if (activeKey.current !== hash) {
           ranOwnQuery.current = false;
           seen.current = 0;
+          seenError.current = 0;
+          ownErrorReported.current = false;
         }
         activeKey.current = hash;
         const previous = pausedIn.current;
@@ -242,6 +255,10 @@ export const createReactQueryDriver = ({
       const ranOwnQuery = useRef(false);
       // `dataUpdatedAt` this hook last settled on (see the watch below).
       const seen = useRef(0);
+      // `errorUpdatedAt` this hook last settled on, and whether its own run
+      // already reported that failure from the query function.
+      const seenError = useRef(0);
+      const ownErrorReported = useRef(false);
 
       const result = useQuery({
         enabled: key !== null && armed && !schedule.isPaused?.(),
@@ -261,7 +278,13 @@ export const createReactQueryDriver = ({
           try {
             data = await fetcher();
           } catch (error) {
-            report()?.onError?.(error);
+            const reported = report();
+            // Only a run that still owns the key reports; one it no longer owns
+            // settles on its own response, so the failure is not this hook's.
+            if (reported?.onError) {
+              ownErrorReported.current = true;
+              reported.onError(error);
+            }
             throw error;
           }
           report()?.onSuccess?.(data);
@@ -299,6 +322,27 @@ export const createReactQueryDriver = ({
         // The query function hands TanStack `null` for an `undefined` response;
         // the callback gets what the fetcher returned.
         callbacks.current?.onSuccess?.((result.data === null ? undefined : result.data) as T);
+      });
+
+      // A failure this hook's own query function did not produce: TanStack
+      // deduped the shared fetch to another replica's hook, so only that hook's
+      // `onError` ran and this view would keep a settled failure unseen.
+      // `errorUpdatedAt` identifies the failure, so it is delivered once.
+      useLayoutEffect(() => {
+        if (key === null) return;
+        const errorAt = result.errorUpdatedAt ?? 0;
+        if (errorAt === 0 || errorAt === seenError.current) return;
+        seenError.current = errorAt;
+        if (ownErrorReported.current) {
+          // Its own run reported this failure from the query function already;
+          // record it so a sibling hook of the same key does not fold it again.
+          ownErrorReported.current = false;
+          deliveredError.set(hash, errorAt);
+          return;
+        }
+        if (deliveredError.get(hash) === errorAt) return;
+        deliveredError.set(hash, errorAt);
+        callbacks.current?.onError?.(result.error);
       });
 
       return {

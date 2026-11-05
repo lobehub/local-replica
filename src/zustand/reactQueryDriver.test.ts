@@ -377,6 +377,44 @@ describe('createReactQueryDriver', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it('settles a hook on a shared failure the other replica query hit', async () => {
+    const request = deferred<string[]>();
+    const failure = new Error('offline');
+    const { fetcher, first, second, wrapper } = sharedSetup(vi.fn(() => request.promise));
+
+    const firstError = vi.fn();
+    renderHook(() => first.useReplica({ id: 'a' }, { onError: firstError }), { wrapper });
+    // The second replica joins the key while the fetch is still in flight, so
+    // TanStack dedupes it and only the first hook's `queryFn` runs — and so only
+    // its `onError` would run. The failure is on screen for both.
+    const secondError = vi.fn();
+    renderHook(() => second.useReplica({ id: 'a' }, { onError: secondError }), { wrapper });
+
+    await act(async () => request.reject(failure));
+
+    await waitFor(() => expect(firstError).toHaveBeenCalledTimes(1));
+    expect(firstError).toHaveBeenCalledWith(failure, expect.objectContaining({ key: 'a' }));
+    await waitFor(() => expect(secondError).toHaveBeenCalledTimes(1));
+    expect(secondError).toHaveBeenCalledWith(failure, expect.objectContaining({ key: 'a' }));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a shared failure once when two hooks of one replica await it', async () => {
+    const request = deferred<string[]>();
+    const failure = new Error('offline');
+    const { replica, wrapper } = setup(vi.fn(() => request.promise));
+    const first = vi.fn();
+    const second = vi.fn();
+
+    renderHook(() => replica.useReplica({ id: 'a' }, { onError: first }), { wrapper });
+    renderHook(() => replica.useReplica({ id: 'a' }, { onError: second }), { wrapper });
+
+    await act(async () => request.reject(failure));
+
+    await waitFor(() => expect(first).toHaveBeenCalledTimes(1));
+    expect(second).not.toHaveBeenCalled();
+  });
+
   it('keeps the delivery memory while another hook still shows the key', async () => {
     const { fetcher, replica, wrapper } = setup();
     const first = vi.fn();
