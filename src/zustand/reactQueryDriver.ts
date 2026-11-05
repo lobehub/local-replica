@@ -178,14 +178,22 @@ export const createReactQueryDriver = ({
         },
         [],
       );
-      // `revalidateOnMount: false` holds the first request until `mutate`.
-      const [armed, setArmed] = useState(schedule.revalidateOnMount !== false);
+      // `revalidateOnMount: false` holds the first request of the key this hook
+      // mounted with, until `mutate`. The hold is per key, not per hook: a key
+      // the hook switches to has never been requested by it, so it fetches like
+      // any other mount, and the schedule's contract says so.
+      const heldKey = useRef<string | null>(schedule.revalidateOnMount === false ? hash : null);
+      // Re-render once `mutate` releases the hold (`heldKey` is a ref).
+      const [, releaseMountHold] = useState(0);
+      const armed = heldKey.current !== hash;
       /**
-       * Whether this hook itself ran the query function for the key it shows.
-       * Its own run reports the settlement; the cache watch below is for
-       * results that arrived without it — a key another replica already fetched
-       * over the shared `QueryClient`, or a value still cached on mount. Reset
-       * when the hook switches keys.
+       * Whether this hook itself ran the query function for the settlement it
+       * shows. Its own run reports that settlement from the query function; the
+       * cache watch below is for results that arrived without it — a key another
+       * replica already fetched over the shared `QueryClient`, or a value still
+       * cached on mount. It is per settlement, not per mounted key: the watch
+       * clears it once that settlement is folded, so a later result on the same
+       * key is settled by this hook too. Reset when the hook switches keys.
        */
       const ranOwnQuery = useRef(false);
       // `dataUpdatedAt` this hook last settled on (see the watch below).
@@ -230,9 +238,15 @@ export const createReactQueryDriver = ({
         const dataAt = result.dataUpdatedAt ?? 0;
         if (key === null) return;
         if (ranOwnQuery.current) {
-          // Its own run reported this one: record it so a sibling hook of the
-          // same key does not fold the same result again.
-          if (dataAt !== 0) deliveredData.set(hash, dataAt);
+          // The settlement this hook's own run produced: its callback already ran
+          // from the query function. Record it so a sibling hook of the same key
+          // does not fold the same result again, then hand the ownership back —
+          // a settlement after this one came from another run (a replica that
+          // refetched the shared key), and this hook has to settle on it itself.
+          if (dataAt === 0 || dataAt === seen.current) return;
+          ranOwnQuery.current = false;
+          seen.current = dataAt;
+          deliveredData.set(hash, dataAt);
           return;
         }
         if (dataAt === 0 || dataAt === seen.current || deliveredData.get(hash) === dataAt) return;
@@ -248,7 +262,8 @@ export const createReactQueryDriver = ({
         error: result.error ?? undefined,
         isValidating: result.isFetching,
         mutate: () => {
-          setArmed(true);
+          heldKey.current = null;
+          releaseMountHold((renders) => renders + 1);
           // No key: there is nothing to fetch, and a manual refetch would run the
           // disabled query's fetcher with the null params the caller passed.
           if (key === null) return Promise.resolve(result.data);

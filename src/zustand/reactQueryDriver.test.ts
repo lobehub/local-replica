@@ -188,6 +188,24 @@ describe('createReactQueryDriver', () => {
     await waitFor(() => expect(result.current.data).toEqual(['server b']));
   });
 
+  it('fetches a key the hook switches to after mounting with revalidateOnMount: false', async () => {
+    const { fetcher, replica, wrapper } = setup();
+
+    // The mount hold belongs to the key the hook mounted with: the key it moves
+    // to was never requested, so it fetches like any other mount.
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string }) => replica.useReplica({ id }, { revalidateOnMount: false }),
+      { initialProps: { id: 'a' }, wrapper },
+    );
+    await waitFor(() => expect(result.current.isHydrated).toBe(true));
+    expect(fetcher).not.toHaveBeenCalled();
+
+    rerender({ id: 'b' });
+
+    await waitFor(() => expect(result.current.data).toEqual(['server b']));
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith({ id: 'b' }, undefined);
+  });
+
   it('holds an explicit revalidate while paused, and runs it once the pause lifts', async () => {
     const { fetcher, replica, wrapper } = setup();
     let paused = true;
@@ -319,6 +337,31 @@ describe('createReactQueryDriver', () => {
     await waitFor(() => expect(b.current.data).toEqual(['server a']));
     expect(secondDone).toHaveBeenCalledExactlyOnceWith(['server a']);
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('settles a hook on a result another replica fetched after its own run', async () => {
+    const { first, second, wrapper } = sharedSetup();
+
+    const firstDone = vi.fn();
+    renderHook(() => first.useReplica({ id: 'a' }, { onSuccess: firstDone }), { wrapper });
+    await waitFor(() => expect(firstDone).toHaveBeenCalledExactlyOnceWith(['server a']));
+
+    // The second replica joins the shared key. Its later refetch changes the
+    // settlement, and the first hook's own run is long done: it has to settle
+    // on the newer result instead of resting on the one it fetched.
+    const secondDone = vi.fn();
+    renderHook(
+      () => second.useReplica({ id: 'a' }, { onSuccess: secondDone, revalidateIfStale: false }),
+      { wrapper },
+    );
+    await waitFor(() => expect(secondDone).toHaveBeenCalledExactlyOnceWith(['server a']));
+
+    await act(async () => {
+      await second.revalidate('a');
+    });
+
+    await waitFor(() => expect(firstDone).toHaveBeenCalledTimes(2));
+    expect(firstDone).toHaveBeenLastCalledWith(['server a']);
   });
 
   it('reports a shared key once when two hooks of one replica mount together', async () => {
