@@ -377,6 +377,28 @@ describe('createReactQueryDriver', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the delivery memory while another hook still shows the key', async () => {
+    const { fetcher, replica, wrapper } = setup();
+    const first = vi.fn();
+    const second = vi.fn();
+
+    const firstHook = renderHook(() => replica.useReplica({ id: 'a' }, { onSuccess: first }), {
+      wrapper,
+    });
+    renderHook(() => replica.useReplica({ id: 'a' }, { onSuccess: second }), { wrapper });
+
+    await waitFor(() => expect(first).toHaveBeenCalledExactlyOnceWith(['server a']));
+    expect(second).not.toHaveBeenCalled();
+
+    // One hook leaves, the key is still on screen: the settlement it reported is
+    // still the one this activation delivered, so the remaining hook folds
+    // nothing and the key is not refetched.
+    firstHook.unmount();
+    await Promise.resolve();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(second).not.toHaveBeenCalled();
+  });
+
   it('replays a cached result to the next hook after the key was left', async () => {
     const { fetcher, replica, wrapper } = setup();
     const first = vi.fn();

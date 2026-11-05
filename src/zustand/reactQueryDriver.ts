@@ -118,15 +118,21 @@ export const createReactQueryDriver = ({
   /** Hooks currently showing each key; the last one to leave ends its activation. */
   const activeKeyHooks = new Map<string, Set<number>>();
 
+  /** The hooks showing a key; an absent one shows none. */
+  const keyHooksOf = (keyHash: string) => {
+    const existing = activeKeyHooks.get(keyHash);
+    if (existing) return existing;
+    const created = new Set<number>();
+    activeKeyHooks.set(keyHash, created);
+    return created;
+  };
+
   const joinKey = (keyHash: string, hook: number) => {
-    const keyHooks = activeKeyHooks.get(keyHash) ?? new Set<number>();
-    keyHooks.add(hook);
-    activeKeyHooks.set(keyHash, keyHooks);
+    keyHooksOf(keyHash).add(hook);
   };
 
   const leaveKey = (keyHash: string, hook: number) => {
-    const keyHooks = activeKeyHooks.get(keyHash);
-    if (!keyHooks) return;
+    const keyHooks = keyHooksOf(keyHash);
     keyHooks.delete(hook);
     if (keyHooks.size > 0) return;
     activeKeyHooks.delete(keyHash);
@@ -183,17 +189,21 @@ export const createReactQueryDriver = ({
       const pausedIn = useRef<string | null>(null);
       const hash = JSON.stringify(key);
       const paused = key !== null && (schedule.isPaused?.() ?? false);
+      // One activation of the key per hook: the delivery memory it dedupes
+      // against lives from this effect's setup to its cleanup, so a key that
+      // comes back later is a new activation rather than a re-render of one
+      // whose view is gone.
+      useLayoutEffect(() => {
+        joinKey(hash, hook.current);
+        return () => leaveKey(hash, hook.current);
+      }, [hash]);
       useLayoutEffect(() => {
         callbacks.current = { onError, onSuccess };
         // A different key: this hook has not run that key's query yet, so a
         // result cached under it is one it still has to settle (see the watch).
-        // It is also a new activation of the key it moved to — one that comes
-        // back later (scope A → B → A, or an unmounted key) starts over.
         if (activeKey.current !== hash) {
-          if (activeKey.current !== null) leaveKey(activeKey.current, hook.current);
           ranOwnQuery.current = false;
           seen.current = 0;
-          joinKey(hash, hook.current);
         }
         activeKey.current = hash;
         const previous = pausedIn.current;
@@ -205,8 +215,6 @@ export const createReactQueryDriver = ({
       useEffect(
         () => () => {
           callbacks.current = null;
-          // The hook leaves its key: with it may go the key's activation.
-          if (activeKey.current !== null) leaveKey(activeKey.current, hook.current);
           activeKey.current = null;
           const previous = pausedIn.current;
           pausedIn.current = null;
