@@ -330,8 +330,12 @@ export const createReactQueryDriver = ({
       // `errorUpdatedAt` identifies the failure, so it is delivered once.
       useLayoutEffect(() => {
         if (key === null) return;
+        // TanStack's success reducer clears `error` but keeps `errorUpdatedAt`,
+        // so a nonzero timestamp alone does not identify a current failure: a
+        // cache that failed once and then succeeded would replay `onError(null)`
+        // to the next replica that mounts on it. Only a live error is a failure.
         const errorAt = result.errorUpdatedAt ?? 0;
-        if (errorAt === 0 || errorAt === seenError.current) return;
+        if (errorAt === 0 || errorAt === seenError.current || result.error == null) return;
         seenError.current = errorAt;
         if (ownErrorReported.current) {
           // Its own run reported this failure from the query function already;

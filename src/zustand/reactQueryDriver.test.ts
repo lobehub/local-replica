@@ -399,6 +399,37 @@ describe('createReactQueryDriver', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it('does not replay a failure the query has since recovered from', async () => {
+    const failure = new Error('offline');
+    const fetcher = vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(['server a']);
+    const { first, second, wrapper } = sharedSetup(fetcher);
+
+    const firstError = vi.fn();
+    const { result } = renderHook(() => first.useReplica({ id: 'a' }, { onError: firstError }), {
+      wrapper,
+    });
+    await waitFor(() => expect(firstError).toHaveBeenCalledExactlyOnceWith(failure, expect.anything()));
+    expect(result.current.error).toEqual(failure);
+
+    // A later run succeeds. TanStack clears `error` but keeps `errorUpdatedAt`,
+    // so the cached entry still carries the timestamp of a failure nobody is in.
+    await act(async () => {
+      await first.revalidate('a');
+    });
+    await waitFor(() => expect(result.current.error).toBeUndefined());
+
+    // A replica with a fresh delivery map mounts on that recovered cache: it has
+    // to settle the cached success and stay quiet about the historical failure.
+    const secondError = vi.fn();
+    const { result: secondResult } = renderHook(
+      () => second.useReplica({ id: 'a' }, { onError: secondError, revalidateIfStale: false }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(secondResult.current.data).toEqual(['server a']));
+    expect(secondError).not.toHaveBeenCalled();
+  });
+
   it('reports a shared failure once when two hooks of one replica await it', async () => {
     const request = deferred<string[]>();
     const failure = new Error('offline');
