@@ -183,7 +183,7 @@ export const createReactQueryDriver = ({
     useQuery: <T>(
       key: readonly unknown[] | null,
       fetcher: () => Promise<T>,
-      { once, onError, onSuccess, ...schedule }: ReplicaQueryOptions<T>,
+      { once, onError, onSuccess, replayable, ...schedule }: ReplicaQueryOptions<T>,
     ) => {
       // The latest render's callbacks, like SWR; cleared on unmount.
       const callbacks = useRef<Pick<ReplicaQueryOptions<T>, 'onError' | 'onSuccess'> | null>(
@@ -317,6 +317,11 @@ export const createReactQueryDriver = ({
           return;
         }
         if (dataAt === 0 || dataAt === seen.current || deliveredData.get(hash) === dataAt) return;
+        // The replica dropped this entry after the value was cached (`remove`,
+        // or a clear of its scope). The cache still holds it, but replaying it
+        // would put the dropped entry back on screen; leave the view empty until
+        // a real response lands.
+        if (replayable && !replayable(dataAt)) return;
         seen.current = dataAt;
         deliveredData.set(hash, dataAt);
         // The query function hands TanStack `null` for an `undefined` response;

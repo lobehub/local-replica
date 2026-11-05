@@ -36,6 +36,19 @@ export interface ReplicaSyncSchedule {
 export interface ReplicaQueryOptions<T> extends ReplicaSyncSchedule {
   /** Run once per key: no refetch on focus, reconnect or remount (hydration reads). */
   once?: boolean;
+  /**
+   * Whether a settlement already in the cache may be delivered to this hook,
+   * called with the settlement's timestamp (its `dataUpdatedAt`).
+   *
+   * The replica drops an entry on purpose on `remove` and on a clear of its
+   * scope, which empties the view but not the driver's cache. A driver that
+   * settles a hook on a result it did not fetch — a cached one, or one a shared
+   * query deduped away — must therefore honour this: replaying a value older
+   * than the drop puts the dropped entry back on screen, where it stays until a
+   * real response replaces it. A driver that only reports fetches it ran can
+   * ignore the option.
+   */
+  replayable?: (settledAt: number) => boolean;
   onError?: (error: unknown) => void;
   onSuccess?: (data: T) => void;
 }
@@ -111,7 +124,9 @@ export const createSWRDriver = ({
   seed: (key, data) => {
     void mutate(key, data, { revalidate: false }).catch(() => undefined);
   },
-  useQuery: (key, fetcher, { once, onError, onSuccess, ...schedule }) =>
+  // `replayable` gates a driver that settles a hook on a cached result. SWR only
+  // reports a fetch it ran, so a cached value never reaches `onSuccess` here.
+  useQuery: (key, fetcher, { once, onError, onSuccess, replayable: _replayable, ...schedule }) =>
     useSWR(key, fetcher, {
       ...Object.fromEntries(Object.entries(schedule).filter(([, value]) => value !== undefined)),
       ...(once && {

@@ -494,6 +494,55 @@ describe('createReactQueryDriver', () => {
     expect(first).toHaveBeenCalledTimes(1);
   });
 
+  it('does not replay a value the replica removed after caching it', async () => {
+    const { fetcher, replica, wrapper } = setup();
+    const first = vi.fn();
+    const firstHook = renderHook(() => replica.useReplica({ id: 'a' }, { onSuccess: first }), {
+      wrapper,
+    });
+    await waitFor(() => expect(first).toHaveBeenCalledExactlyOnceWith(['server a']));
+
+    // The entry is gone: the view and the persisted row are dropped, but the
+    // query cache still holds the value.
+    firstHook.unmount();
+    act(() => void replica.remove('a'));
+
+    // `revalidateIfStale: false` does not refetch, so replaying the cached value
+    // here would put the removed entry straight back on screen.
+    const second = vi.fn();
+    const { result } = renderHook(
+      () => replica.useReplica({ id: 'a' }, { onSuccess: second, revalidateIfStale: false }),
+      { wrapper },
+    );
+    await Promise.resolve();
+
+    expect(second).not.toHaveBeenCalled();
+    expect(result.current.data).toBeUndefined();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not replay a value from a scope cleared after caching it', async () => {
+    const { replica, wrapper } = setup();
+    const first = vi.fn();
+    const firstHook = renderHook(() => replica.useReplica({ id: 'a' }, { onSuccess: first }), {
+      wrapper,
+    });
+    await waitFor(() => expect(first).toHaveBeenCalledExactlyOnceWith(['server a']));
+
+    firstHook.unmount();
+    await act(async () => void (await replica.clear()));
+
+    const second = vi.fn();
+    const { result } = renderHook(
+      () => replica.useReplica({ id: 'a' }, { onSuccess: second, revalidateIfStale: false }),
+      { wrapper },
+    );
+    await Promise.resolve();
+
+    expect(second).not.toHaveBeenCalled();
+    expect(result.current.data).toBeUndefined();
+  });
+
   it('settles a cached result as the undefined the fetcher returned', async () => {
     const { first, second, wrapper } = sharedSetup(
       vi.fn(async (_: { id: string }) => undefined as unknown as string[]),
@@ -513,7 +562,14 @@ describe('createReactQueryDriver', () => {
 
   describe('options', () => {
     const capture = () => {
-      const result = { data: undefined, error: null, isFetching: false, refetch: vi.fn() };
+      const result = {
+        data: undefined as unknown,
+        // Absent until a test says the fake hook holds a settlement.
+        dataUpdatedAt: undefined as number | undefined,
+        error: null as unknown,
+        isFetching: false,
+        refetch: vi.fn(),
+      };
       const useQueryHook = vi.fn<ReactQueryLikeHook>(() => result);
       const driver = createReactQueryDriver({
         queryClient: new QueryClient(),
@@ -597,6 +653,43 @@ describe('createReactQueryDriver', () => {
       act(() => void result.current.mutate());
       expect(query.refetch).toHaveBeenCalledOnce();
       expect(options().enabled).toBe(true);
+    });
+
+    it('replays a cached settlement when the replica reports no drop', () => {
+      const { driver, result: query } = capture();
+      const onSuccess = vi.fn();
+      const { rerender } = renderHook(() =>
+        driver.useQuery(['k'], async () => 'server', { onSuccess }),
+      );
+
+      // A result this hook did not fetch, already in the cache: nothing says the
+      // replica dropped it, so the hook settles on it.
+      query.data = 'cached';
+      query.dataUpdatedAt = 1;
+      rerender();
+
+      expect(onSuccess).toHaveBeenCalledExactlyOnceWith('cached');
+    });
+
+    it('holds a cached settlement back when the replica reports a drop', () => {
+      const { driver, result: query } = capture();
+      const onSuccess = vi.fn();
+      let dropped = true;
+      const { rerender } = renderHook(() =>
+        driver.useQuery(['k'], async () => 'server', { onSuccess, replayable: () => !dropped }),
+      );
+
+      query.data = 'cached';
+      query.dataUpdatedAt = 1;
+      rerender();
+      expect(onSuccess).not.toHaveBeenCalled();
+
+      // A value settled after the drop is a real response, not the dropped one.
+      dropped = false;
+      query.dataUpdatedAt = 2;
+      rerender();
+
+      expect(onSuccess).toHaveBeenCalledExactlyOnceWith('cached');
     });
 
     it('does not refetch a paused query on mutate, and arms it for when the pause lifts', () => {

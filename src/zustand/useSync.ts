@@ -12,7 +12,7 @@ export interface ReplicaUseSyncDeps<TStore, TParams, TData, TFetched> {
   driver: ReplicaSyncDriver;
   engine: Pick<
     ReplicaEngine<TParams, TData, TFetched>,
-    'ensureScope' | 'fetcher' | 'hydrate' | 'retain'
+    'droppedAt' | 'ensureScope' | 'fetcher' | 'hydrate' | 'retain'
   >;
   get: () => TStore;
   /** Row key of the head query each entry last asked for (see the slice's `headQuery`). */
@@ -28,7 +28,7 @@ export interface ReplicaUseSyncDeps<TStore, TParams, TData, TFetched> {
  */
 export const createUseSync = <TStore, TParams, TData, TFetched>({
   driver,
-  engine: { ensureScope, fetcher, hydrate, retain },
+  engine: { droppedAt, ensureScope, fetcher, hydrate, retain },
   get,
   headQuery,
   requests,
@@ -143,6 +143,11 @@ export const createUseSync = <TStore, TParams, TData, TFetched>({
       });
     }, [active, key, scope, hydration.data]);
 
+    // The last time this entry was dropped on purpose (`remove`, or a clear of
+    // its scope), or `0` if it never was: the sync query's cached result is only
+    // replayed to this hook when it is newer than that (see `replayable`).
+    const droppedFrom = key === undefined ? 0 : droppedAt(scope, key);
+
     const syncKey = active && fetcher ? requests.syncKeyOf(params!, scope, key!) : null;
     // The sync this hook last asked for. A driver may report a request that was
     // in flight when the hook went inactive (SWR keeps the last non-null key and
@@ -176,6 +181,11 @@ export const createUseSync = <TStore, TParams, TData, TFetched>({
       () => requests.startSync(params!, scope),
       {
         ...schedule,
+        // A cached settlement older than the last drop of this entry — a
+        // `remove`, or a clear of its scope — is one the replica already let go
+        // of, and replaying it would put the entry back on screen. A read with
+        // no key has no entry to drop.
+        replayable: (settledAt) => settledAt > droppedFrom,
         // Always installed, so a failed request is settled (and its capture
         // dropped) even when the caller has no error side effects. A failure
         // of a query the entry has moved past (or of a request from before a

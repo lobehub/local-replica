@@ -22,24 +22,31 @@ export const createRemovalGuards = () => {
    */
   const purgedEntries = createTombstones();
   /**
-   * Bumped on every removal of a scope+key. A network response whose request
-   * started before the entry was removed (deleted, access revoked, pruned by an
-   * authoritative parent list) must not `replace` it back: the slice records
-   * the generation a request starts under and drops a response that crossed a
-   * removal. Bounded like the tombstones; an evicted key reads 0, which only
-   * ever drops a response (the next revalidate refetches), never admits one.
+   * Bumped on every removal of a scope+key, and stamped with when it happened.
+   * A network response whose request started before the entry was removed
+   * (deleted, access revoked, pruned by an authoritative parent list) must not
+   * `replace` it back: the slice records the generation a request starts under
+   * and drops a response that crossed a removal. The stamp answers the other
+   * half of the same question — a value cached *before* the removal must not be
+   * replayed to a later mount — see the engine's `droppedAt`.
+   *
+   * Bounded like the tombstones; an evicted key reads 0, which only ever drops a
+   * response (the next revalidate refetches), never admits one.
    */
-  const removalGenerations = new Map<string, number>();
+  const removalGenerations = new Map<string, { at: number; generation: number }>();
   const removalId = (scope: string, key: string) => `${scope}\u0000${key}`;
   const removalGeneration = (scope: string, key: string) =>
-    removalGenerations.get(removalId(scope, key)) ?? 0;
+    removalGenerations.get(removalId(scope, key))?.generation ?? 0;
+  /** When `scope`/`key` was last removed, or `0` if it never was. */
+  const removalWatermark = (scope: string, key: string) =>
+    removalGenerations.get(removalId(scope, key))?.at ?? 0;
   const markRemoved = (scope: string, key: string) => {
     removedEntries.add(scope, key);
     const id = removalId(scope, key);
-    const next = (removalGenerations.get(id) ?? 0) + 1;
+    const next = (removalGenerations.get(id)?.generation ?? 0) + 1;
     // Re-insert so the map's insertion order is least-recently-removed first.
     removalGenerations.delete(id);
-    removalGenerations.set(id, next);
+    removalGenerations.set(id, { at: Date.now(), generation: next });
     if (removalGenerations.size > DEFAULT_REMOVAL_TOMBSTONE_LIMIT)
       removalGenerations.delete(removalGenerations.keys().next().value as string);
   };
@@ -51,7 +58,15 @@ export const createRemovalGuards = () => {
   const markPurged = (scope: string, key: string) => purgedEntries.add(scope, key);
   const isPurged = (scope: string, key: string) => purgedEntries.has(scope, key);
 
-  return { clearRemoved, isPurged, isRemoved, markPurged, markRemoved, removalGeneration };
+  return {
+    clearRemoved,
+    isPurged,
+    isRemoved,
+    markPurged,
+    markRemoved,
+    removalGeneration,
+    removalWatermark,
+  };
 };
 
 export type ReplicaRemovalGuards = ReturnType<typeof createRemovalGuards>;
