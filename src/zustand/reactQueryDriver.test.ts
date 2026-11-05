@@ -377,6 +377,32 @@ describe('createReactQueryDriver', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it('replays a cached result to the next hook after the key was left', async () => {
+    const { fetcher, replica, wrapper } = setup();
+    const first = vi.fn();
+    const firstHook = renderHook(() => replica.useReplica({ id: 'a' }, { onSuccess: first }), {
+      wrapper,
+    });
+    await waitFor(() => expect(first).toHaveBeenCalledExactlyOnceWith(['server a']));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    // The view that held `a` goes away (an unmount, or a scope reset that
+    // clears the same entries): its delivery is no longer on screen.
+    firstHook.unmount();
+
+    // The key comes back with the result still cached. `revalidateIfStale:
+    // false` does not refetch it, so the new hook has to settle on the cached
+    // value — otherwise the key shows nothing while its query succeeded.
+    const second = vi.fn();
+    renderHook(
+      () => replica.useReplica({ id: 'a' }, { onSuccess: second, revalidateIfStale: false }),
+      { wrapper },
+    );
+    await waitFor(() => expect(second).toHaveBeenCalledExactlyOnceWith(['server a']));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(first).toHaveBeenCalledTimes(1);
+  });
+
   it('settles a cached result as the undefined the fetcher returned', async () => {
     const { first, second, wrapper } = sharedSetup(
       vi.fn(async (_: { id: string }) => undefined as unknown as string[]),
