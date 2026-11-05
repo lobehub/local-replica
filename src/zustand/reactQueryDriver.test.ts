@@ -565,8 +565,11 @@ describe('createReactQueryDriver', () => {
       const result = {
         data: undefined as unknown,
         // Absent until a test says the fake hook holds a settlement.
+        dataUpdateCount: undefined as number | undefined,
         dataUpdatedAt: undefined as number | undefined,
         error: null as unknown,
+        errorUpdateCount: undefined as number | undefined,
+        errorUpdatedAt: undefined as number | undefined,
         isFetching: false,
         refetch: vi.fn(),
       };
@@ -690,6 +693,50 @@ describe('createReactQueryDriver', () => {
       rerender();
 
       expect(onSuccess).toHaveBeenCalledExactlyOnceWith('cached');
+    });
+
+    it('settles a second value that shares the first settlement timestamp', () => {
+      const { driver, result: query } = capture();
+      const onSuccess = vi.fn();
+      const { rerender } = renderHook(() =>
+        driver.useQuery(['k'], async () => 'server', { onSuccess }),
+      );
+
+      // Two updates in one millisecond: TanStack stamps both with the same
+      // `dataUpdatedAt`, so the timestamp alone cannot tell them apart.
+      query.data = 'first';
+      query.dataUpdatedAt = 1;
+      query.dataUpdateCount = 1;
+      rerender();
+      expect(onSuccess).toHaveBeenCalledExactlyOnceWith('first');
+
+      query.data = 'second';
+      query.dataUpdatedAt = 1;
+      query.dataUpdateCount = 2;
+      rerender();
+
+      expect(onSuccess).toHaveBeenCalledTimes(2);
+      expect(onSuccess).toHaveBeenLastCalledWith('second');
+    });
+
+    it('settles a second failure that shares the first settlement timestamp', () => {
+      const { driver, result: query } = capture();
+      const onError = vi.fn();
+      const { rerender } = renderHook(() => driver.useQuery(['k'], async () => 'server', { onError }));
+
+      query.error = new Error('first');
+      query.errorUpdatedAt = 1;
+      query.errorUpdateCount = 1;
+      rerender();
+      expect(onError).toHaveBeenCalledExactlyOnceWith(new Error('first'));
+
+      query.error = new Error('second');
+      query.errorUpdatedAt = 1;
+      query.errorUpdateCount = 2;
+      rerender();
+
+      expect(onError).toHaveBeenCalledTimes(2);
+      expect(onError).toHaveBeenLastCalledWith(new Error('second'));
     });
 
     it('does not refetch a paused query on mutate, and arms it for when the pause lifts', () => {

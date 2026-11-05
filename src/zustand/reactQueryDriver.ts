@@ -20,9 +20,18 @@ export interface ReactQueryLikeClient {
 /** TanStack Query's `useQuery` (v5). */
 export type ReactQueryLikeHook = (options: any) => {
   data?: any;
+  /**
+   * How many times the cached data changed. TanStack's settlement identity: it
+   * increments per update, so two updates that land in the same millisecond
+   * still get different values. Missing on older shapes — the driver falls back
+   * to `dataUpdatedAt` then.
+   */
+  dataUpdateCount?: number;
   /** When the cached data last changed; `0` when the query holds none. */
   dataUpdatedAt?: number;
   error: unknown;
+  /** How many times the cached failure changed; the error-side `dataUpdateCount`. */
+  errorUpdateCount?: number;
   /** When the cached failure last changed; `0` when the query holds none. */
   errorUpdatedAt?: number;
   isFetching: boolean;
@@ -31,6 +40,13 @@ export type ReactQueryLikeHook = (options: any) => {
 
 /** Query key of a sync with no key: never fetched, so it never shares data. */
 const DISABLED_KEY = ['local-replica', 'disabled'] as const;
+
+/**
+ * Identity of a settlement: the update count when the hook reports one, the
+ * update timestamp otherwise. The count is what separates two settlements that
+ * land in the same millisecond — TanStack stamps both with one wall-clock value.
+ */
+const settlementId = (count?: number, at?: number) => count ?? at ?? 0;
 
 /**
  * Map the SWR-named schedule onto `useQuery` options. Only options the caller
@@ -105,7 +121,8 @@ export const createReactQueryDriver = ({
   let hooks = 0;
 
   /**
-   * `dataUpdatedAt` of the result each key last reported off the cache, so a
+   * Settlement id (`dataUpdateCount`, or `dataUpdatedAt` where the hook does not
+   * expose one) of the result each key last reported off the cache, so a
    * re-render of the same settlement reports nothing, and so a sibling hook of
    * the same key does not fold the settlement that hook already reported.
    *
@@ -118,7 +135,7 @@ export const createReactQueryDriver = ({
   const deliveredData = new Map<string, number>();
 
   /**
-   * `errorUpdatedAt` of the failure each key last reported off the cache, the
+   * Settlement id of the failure each key last reported off the cache, the
    * error-side twin of `deliveredData`: a sibling hook — in another driver over
    * the same `QueryClient` — still has to settle a failure whose `queryFn` only
    * the executing hook ran, and must settle it once.
@@ -253,10 +270,10 @@ export const createReactQueryDriver = ({
        * key is settled by this hook too. Reset when the hook switches keys.
        */
       const ranOwnQuery = useRef(false);
-      // `dataUpdatedAt` this hook last settled on (see the watch below).
+      // Settlement id this hook last settled on (see the watch below).
       const seen = useRef(0);
-      // `errorUpdatedAt` this hook last settled on, and whether its own run
-      // already reported that failure from the query function.
+      // Settlement id of the failure this hook last settled on, and whether its
+      // own run already reported that failure from the query function.
       const seenError = useRef(0);
       const ownErrorReported = useRef(false);
 
@@ -299,10 +316,12 @@ export const createReactQueryDriver = ({
       // with another replica over the same `QueryClient` (TanStack dedupes the
       // fetch), or a cache still holding the value when this hook mounted. The
       // hook still has to settle it, or its view stays empty while the query
-      // succeeded. `dataUpdatedAt` identifies the settlement, so re-renders of
-      // the same one report nothing.
+      // succeeded. The settlement's id identifies it, so re-renders of the same
+      // one report nothing — and two settlements that share one millisecond are
+      // still told apart, since the id is the update count where there is one.
       useLayoutEffect(() => {
         const dataAt = result.dataUpdatedAt ?? 0;
+        const dataId = settlementId(result.dataUpdateCount, result.dataUpdatedAt);
         if (key === null) return;
         if (ranOwnQuery.current) {
           // The settlement this hook's own run produced: its callback already ran
@@ -310,20 +329,20 @@ export const createReactQueryDriver = ({
           // does not fold the same result again, then hand the ownership back —
           // a settlement after this one came from another run (a replica that
           // refetched the shared key), and this hook has to settle on it itself.
-          if (dataAt === 0 || dataAt === seen.current) return;
+          if (dataAt === 0 || dataId === seen.current) return;
           ranOwnQuery.current = false;
-          seen.current = dataAt;
-          deliveredData.set(hash, dataAt);
+          seen.current = dataId;
+          deliveredData.set(hash, dataId);
           return;
         }
-        if (dataAt === 0 || dataAt === seen.current || deliveredData.get(hash) === dataAt) return;
+        if (dataAt === 0 || dataId === seen.current || deliveredData.get(hash) === dataId) return;
         // The replica dropped this entry after the value was cached (`remove`,
         // or a clear of its scope). The cache still holds it, but replaying it
         // would put the dropped entry back on screen; leave the view empty until
         // a real response lands.
         if (replayable && !replayable(dataAt)) return;
-        seen.current = dataAt;
-        deliveredData.set(hash, dataAt);
+        seen.current = dataId;
+        deliveredData.set(hash, dataId);
         // The query function hands TanStack `null` for an `undefined` response;
         // the callback gets what the fetcher returned.
         callbacks.current?.onSuccess?.((result.data === null ? undefined : result.data) as T);
@@ -332,7 +351,7 @@ export const createReactQueryDriver = ({
       // A failure this hook's own query function did not produce: TanStack
       // deduped the shared fetch to another replica's hook, so only that hook's
       // `onError` ran and this view would keep a settled failure unseen.
-      // `errorUpdatedAt` identifies the failure, so it is delivered once.
+      // The failure's settlement id identifies it, so it is delivered once.
       useLayoutEffect(() => {
         if (key === null) return;
         // TanStack's success reducer clears `error` but keeps `errorUpdatedAt`,
@@ -340,17 +359,18 @@ export const createReactQueryDriver = ({
         // cache that failed once and then succeeded would replay `onError(null)`
         // to the next replica that mounts on it. Only a live error is a failure.
         const errorAt = result.errorUpdatedAt ?? 0;
-        if (errorAt === 0 || errorAt === seenError.current || result.error == null) return;
-        seenError.current = errorAt;
+        const errorId = settlementId(result.errorUpdateCount, result.errorUpdatedAt);
+        if (errorAt === 0 || errorId === seenError.current || result.error == null) return;
+        seenError.current = errorId;
         if (ownErrorReported.current) {
           // Its own run reported this failure from the query function already;
           // record it so a sibling hook of the same key does not fold it again.
           ownErrorReported.current = false;
-          deliveredError.set(hash, errorAt);
+          deliveredError.set(hash, errorId);
           return;
         }
-        if (deliveredError.get(hash) === errorAt) return;
-        deliveredError.set(hash, errorAt);
+        if (deliveredError.get(hash) === errorId) return;
+        deliveredError.set(hash, errorId);
         callbacks.current?.onError?.(result.error);
       });
 
