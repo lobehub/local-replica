@@ -465,6 +465,58 @@ describe('createReactQueryDriver', () => {
     expect(done).toHaveBeenCalledWith(['server b']);
   });
 
+  it('clears the error ownership a failed attempt left when a retry succeeds', async () => {
+    const firstFailure = new Error('offline');
+    const laterFailure = new Error('server gone');
+    const fetcher = vi
+      .fn()
+      .mockRejectedValueOnce(firstFailure)
+      .mockResolvedValueOnce(['server a'])
+      .mockRejectedValue(laterFailure);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { gcTime: Infinity, retry: 1, retryDelay: 0 } },
+    });
+    const resourceOf = () =>
+      defineReplica<{ id: string }, string[]>({
+        fetcher,
+        key: ({ id }) => id,
+        name: 'rqRetried',
+        scope,
+        storage: createMemoryStorage().storage,
+        version: 1,
+      });
+    const driver = () => createReactQueryDriver({ queryClient, useQuery });
+    const first = createReplica(resourceOf(), { driver: driver() });
+    const second = createReplica(resourceOf(), { driver: driver() });
+    const wrapper = ({ children }: PropsWithChildren) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+
+    const onError = vi.fn();
+    const { result } = renderHook(() => first.useReplica({ id: 'a' }, { onError }), { wrapper });
+
+    // The first attempt fails, TanStack retries, and the retry succeeds: no
+    // failure settlement is ever published for this run.
+    await waitFor(() => expect(result.current.data).toEqual(['server a']));
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0][0]).toBe(firstFailure);
+
+    // Another replica now fetches the shared key and fails. That failure is a
+    // new settlement this hook never reported, so it has to deliver it — the
+    // failed attempt above left nothing behind for it to consume.
+    const { result: b } = renderHook(
+      () => second.useReplica({ id: 'a' }, { revalidateOnMount: false }),
+      { wrapper },
+    );
+    await waitFor(() => expect(b.current.data).toEqual(['server a']));
+    await act(async () => {
+      await second.revalidate('a').catch(() => undefined);
+    });
+
+    await waitFor(() =>
+      expect(onError.mock.calls.some(([error]) => error === laterFailure)).toBe(true),
+    );
+  });
+
   it('does not replay a failure the query has since recovered from', async () => {
     const failure = new Error('offline');
     const fetcher = vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(['server a']);

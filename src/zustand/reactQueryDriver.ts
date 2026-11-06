@@ -337,7 +337,16 @@ export const createReactQueryDriver = ({
             if (reported) ranOwnQuery.current = false;
             throw error;
           }
-          report()?.onSuccess?.(data);
+          const reported = report();
+          // A run that ends in a success holds no failure of its own to deliver:
+          // TanStack publishes no error settlement while it retries, so the flag
+          // a failed attempt set would still be here when another replica's later
+          // failure lands on this hook, which would consume it and skip its
+          // `onError` along with the resource's error effects. Only a run that
+          // still owns the key may clear it, or a run the hook left behind would
+          // drop the flag the newer run set.
+          if (reported) ownErrorReported.current = false;
+          reported?.onSuccess?.(data);
           // TanStack Query rejects `undefined` data.
           return data === undefined ? null : data;
         },
