@@ -823,6 +823,43 @@ describe('createReactQueryDriver', () => {
       expect(onSuccess).toHaveBeenCalledExactlyOnceWith('after the drop');
     });
 
+    it('judges a key the hook switches to by that key\'s own request start', () => {
+      const { driver, result: query } = capture();
+      const onSuccess = vi.fn();
+      let now = 1000;
+      const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+      const droppedAt = 1500;
+      const { rerender } = renderHook(
+        ({ key }: { key: string[] }) =>
+          driver.useQuery(key, async () => 'server', {
+            onSuccess,
+            replayable: (settledAt) => settledAt > droppedAt,
+          }),
+        { initialProps: { key: ['a'] } },
+      );
+
+      // A request over `a` leaves, and this hook watches it go.
+      query.isFetching = true;
+      rerender({ key: ['a'] });
+
+      // The replica drops the shared entries, then the hook switches to `b`,
+      // which is already fetching: `b`'s request started after the drop, so
+      // the start of `a`'s request must not be the one it is judged by.
+      now = 2000;
+      rerender({ key: ['b'] });
+
+      now = 3000;
+      query.isFetching = false;
+      query.data = 'b after the drop';
+      query.dataUpdateCount = 1;
+      query.dataUpdatedAt = 3000;
+      rerender({ key: ['b'] });
+
+      clock.mockRestore();
+
+      expect(onSuccess).toHaveBeenCalledExactlyOnceWith('b after the drop');
+    });
+
     it('settles a second value that shares the first settlement timestamp', () => {
       const { driver, result: query } = capture();
       const onSuccess = vi.fn();

@@ -215,6 +215,19 @@ export const createReactQueryDriver = ({
       // The key this render shows. A request in flight keeps the key it started
       // with, so a hook that switched keys must not settle the newer one.
       const activeKey = useRef<string | null>(null);
+      /**
+       * When the request this hook last saw leave started, `0` when none does.
+       * A settlement's `dataUpdatedAt` records completion, so a request that
+       * began before the replica dropped the entry and finished after it would
+       * look newer than the drop; the start is what says whether the response
+       * was computed on the pre-drop or the post-drop side of it.
+       *
+       * It belongs to the key the hook is showing, like the other refs reset
+       * below: a hook that switches to a key already fetching would otherwise
+       * compare that key's response against the start of the request it left,
+       * which the drop can sit between, and refuse a valid post-drop response.
+       */
+      const requestStartedAt = useRef(0);
       // Which hook this render is, and the key it registered its pause under, so
       // a key shared by several hooks stays paused while any one of them is.
       const hook = useRef(0);
@@ -240,6 +253,11 @@ export const createReactQueryDriver = ({
           seen.current = 0;
           seenError.current = 0;
           ownErrorReported.current = false;
+          // The request in flight now is not the one the hook last watched
+          // leave: the render below stamps this key's own start, so a shared
+          // query already fetching is judged on its provenance, not its
+          // predecessor's.
+          requestStartedAt.current = 0;
         }
         activeKey.current = hash;
         const previous = pausedIn.current;
@@ -282,14 +300,6 @@ export const createReactQueryDriver = ({
       // own run already reported that failure from the query function.
       const seenError = useRef(0);
       const ownErrorReported = useRef(false);
-      /**
-       * When the request this hook last saw leave started, `0` when none does.
-       * A settlement's `dataUpdatedAt` records completion, so a request that
-       * began before the replica dropped the entry and finished after it would
-       * look newer than the drop; the start is what says whether the response
-       * was computed on the pre-drop or the post-drop side of it.
-       */
-      const requestStartedAt = useRef(0);
 
       const result = useQuery({
         enabled: key !== null && armed && !schedule.isPaused?.(),
