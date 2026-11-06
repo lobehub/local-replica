@@ -315,6 +315,17 @@ describe('createReactQueryDriver', () => {
     expect(seed).toHaveBeenCalledWith(expect.any(Array), ['server a']);
   });
 
+  it('encodes an absent seed as null, the value the query function stores', () => {
+    const { queryClient } = setup();
+    const driver = createReactQueryDriver({ queryClient, useQuery });
+
+    driver.seed!(['k'], undefined);
+
+    // `setQueryData` ignores `undefined`: the cache would stay on the previous
+    // value and a hook showing the key would keep what the server no longer has.
+    expect(queryClient.getQueryData(['k'])).toBeNull();
+  });
+
   it('settles a hook whose replica shares the query a second instance fetched', async () => {
     const { fetcher, first, second, wrapper } = sharedSetup();
 

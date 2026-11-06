@@ -194,8 +194,12 @@ export const createReactQueryDriver = ({
           })
           .map((query) => query.fetch(undefined, { cancelRefetch: true }).catch(() => undefined)),
       ),
+    // TanStack leaves the cache untouched when `setQueryData` receives
+    // `undefined`, so an absent response would settle nothing and a hook on the
+    // same key would keep the value it painted. Encode it like the query
+    // function above, which stores `null` for the same reason.
     seed: (key, data) => {
-      queryClient.setQueryData(key, data);
+      queryClient.setQueryData(key, data === undefined ? null : data);
     },
     useQuery: <T>(
       key: readonly unknown[] | null,
