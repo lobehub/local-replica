@@ -8,8 +8,8 @@ interface ReactQueryLikeQuery {
   fetch(options?: undefined, fetchOptions?: { cancelRefetch?: boolean }): Promise<unknown>;
   getObserversCount(): number;
   queryKey: readonly unknown[];
-  /** The query's state; `seed` reads the settlement id the cache write published. */
-  state?: { dataUpdateCount?: number; dataUpdatedAt?: number };
+  /** The query's state; `seed` reads the settlement the cache write published. */
+  state: { dataUpdateCount?: number; dataUpdatedAt: number };
 }
 
 /** The parts of a TanStack Query `QueryClient` the driver calls. */
@@ -250,14 +250,15 @@ export const createReactQueryDriver = ({
       // and suppress the replay a later mount needs.
       const keyHash = stableQueryKey(key);
       if (!activeKeyHooks.has(keyHash)) return;
-      const state = queryClient
+      // The write above put this key in the cache, so the lookup cannot come up
+      // empty; reading its state is what tells the watch which settlement the
+      // write published, under both identities a hook may settle with.
+      const [seeded] = queryClient
         .getQueryCache()
-        .findAll({ predicate: (query) => stableQueryKey(query.queryKey) === keyHash })
-        .map((query) => query.state)
-        .find((candidate) => candidate !== undefined);
-      if (!state) return;
-      deliveredData.set(keyHash, settlementId(state.dataUpdateCount, state.dataUpdatedAt));
-      if (state.dataUpdatedAt) seededAt.set(keyHash, state.dataUpdatedAt);
+        .findAll({ predicate: (query) => stableQueryKey(query.queryKey) === keyHash });
+      const { dataUpdateCount, dataUpdatedAt } = seeded.state;
+      deliveredData.set(keyHash, settlementId(dataUpdateCount, dataUpdatedAt));
+      seededAt.set(keyHash, dataUpdatedAt);
     },
     useQuery: <T>(
       key: readonly unknown[] | null,
