@@ -311,7 +311,10 @@ export const createReactQueryDriver = ({
             // a replica that then retries the shared key reports its success
             // through that watch, and claiming it as this run's own would leave
             // this view empty on a query that succeeded.
-            ranOwnQuery.current = false;
+            // Only a run that still owns the key may do it: one the hook left
+            // behind (it switched keys while this ran) must not clear the flag
+            // the newer run set, or that run's success is folded twice.
+            if (reported) ranOwnQuery.current = false;
             throw error;
           }
           report()?.onSuccess?.(data);

@@ -436,6 +436,35 @@ describe('createReactQueryDriver', () => {
     await waitFor(() => expect(a.current.data).toEqual(['server a']));
   });
 
+  it('keeps the ownership of a run the hook left behind when it fails', async () => {
+    const requestA = deferred<string[]>();
+    const requestB = deferred<string[]>();
+    const fetcher = vi.fn(({ id }: { id: string }) =>
+      id === 'a' ? requestA.promise : requestB.promise,
+    );
+    const { replica, wrapper } = setup(fetcher);
+
+    const done = vi.fn();
+    const { rerender, result } = renderHook(
+      ({ id }: { id: string }) => replica.useReplica({ id }, { onSuccess: done }),
+      { initialProps: { id: 'a' }, wrapper },
+    );
+
+    // The hook switches keys while A is still in flight, so B's run owns the
+    // success-delivery flag from here on.
+    rerender({ id: 'b' });
+
+    // A rejects after it lost the key: the failure is not this hook's to
+    // report, and handing the ownership back would let B's success be folded
+    // twice — once from its query function, once from the cache watch.
+    await act(async () => requestA.reject(new Error('late')));
+    await act(async () => requestB.resolve(['server b']));
+
+    await waitFor(() => expect(result.current.data).toEqual(['server b']));
+    expect(done).toHaveBeenCalledTimes(1);
+    expect(done).toHaveBeenCalledWith(['server b']);
+  });
+
   it('does not replay a failure the query has since recovered from', async () => {
     const failure = new Error('offline');
     const fetcher = vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(['server a']);
