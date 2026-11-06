@@ -280,6 +280,14 @@ export const createReactQueryDriver = ({
       // own run already reported that failure from the query function.
       const seenError = useRef(0);
       const ownErrorReported = useRef(false);
+      /**
+       * When the request this hook last saw leave started, `0` when none does.
+       * A settlement's `dataUpdatedAt` records completion, so a request that
+       * began before the replica dropped the entry and finished after it would
+       * look newer than the drop; the start is what says whether the response
+       * was computed on the pre-drop or the post-drop side of it.
+       */
+      const requestStartedAt = useRef(0);
 
       const result = useQuery({
         enabled: key !== null && armed && !schedule.isPaused?.(),
@@ -336,6 +344,16 @@ export const createReactQueryDriver = ({
         const dataAt = result.dataUpdatedAt ?? 0;
         const dataId = settlementId(result.dataUpdateCount, result.dataUpdatedAt);
         if (key === null) return;
+        // Whether a request over this key is in flight, and when it started as
+        // this hook saw it. A shared query another replica fetched shows here
+        // too: its settlement lands below without this hook's own run, and only
+        // the start says which side of a drop the response was computed on.
+        const startedAt = requestStartedAt.current;
+        if (result.isFetching) {
+          if (startedAt === 0) requestStartedAt.current = Date.now();
+        } else if (startedAt !== 0) {
+          requestStartedAt.current = 0;
+        }
         if (ranOwnQuery.current) {
           // The settlement this hook's own run produced: its callback already ran
           // from the query function. Record it so a sibling hook of the same key
@@ -353,7 +371,17 @@ export const createReactQueryDriver = ({
         // or a clear of its scope). The cache still holds it, but replaying it
         // would put the dropped entry back on screen; leave the view empty until
         // a real response lands.
-        if (replayable && !replayable(dataAt)) return;
+        // A response whose request began before the entry was dropped holds
+        // pre-drop data even though it completes after the drop, so the gate
+        // reads the request's start rather than its completion.
+        const settledAt = startedAt > 0 && startedAt < dataAt ? startedAt : dataAt;
+        if (replayable && !replayable(settledAt)) {
+          // Let this settlement go: the replica dropped what it would put back.
+          // Recording it keeps a later render from readmitting it once the
+          // start of the request it came from is no longer at hand.
+          seen.current = dataId;
+          return;
+        }
         seen.current = dataId;
         deliveredData.set(hash, dataId);
         // The query function hands TanStack `null` for an `undefined` response;

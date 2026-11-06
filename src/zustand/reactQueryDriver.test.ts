@@ -761,6 +761,53 @@ describe('createReactQueryDriver', () => {
       expect(onSuccess).toHaveBeenCalledExactlyOnceWith('cached');
     });
 
+    it('holds back a cached settlement whose request started before the drop', () => {
+      const { driver, result: query } = capture();
+      const onSuccess = vi.fn();
+      let now = 1000;
+      const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+      let droppedAt = 0;
+      const { rerender } = renderHook(() =>
+        driver.useQuery(['k'], async () => 'server', {
+          onSuccess,
+          replayable: (settledAt) => settledAt > droppedAt,
+        }),
+      );
+
+      // A shared request leaves: this hook did not fetch it, but it sees it go.
+      now = 1100;
+      query.isFetching = true;
+      rerender();
+
+      // The replica drops the entry while that request is still in flight.
+      now = 2000;
+      droppedAt = now;
+
+      // It completes after the drop, so its completion timestamp says nothing
+      // about which side of the drop its response was computed on.
+      now = 3000;
+      query.isFetching = false;
+      query.data = 'before the drop';
+      query.dataUpdatedAt = 3000;
+      rerender();
+      expect(onSuccess).not.toHaveBeenCalled();
+
+      // A request that starts after the drop is a real response.
+      now = 4000;
+      query.isFetching = true;
+      rerender();
+      now = 5000;
+      query.isFetching = false;
+      query.data = 'after the drop';
+      query.dataUpdateCount = 2;
+      query.dataUpdatedAt = 5000;
+      rerender();
+
+      clock.mockRestore();
+
+      expect(onSuccess).toHaveBeenCalledExactlyOnceWith('after the drop');
+    });
+
     it('settles a second value that shares the first settlement timestamp', () => {
       const { driver, result: query } = capture();
       const onSuccess = vi.fn();

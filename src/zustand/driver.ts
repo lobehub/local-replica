@@ -38,7 +38,10 @@ export interface ReplicaQueryOptions<T> extends ReplicaSyncSchedule {
   once?: boolean;
   /**
    * Whether a settlement already in the cache may be delivered to this hook,
-   * called with the settlement's timestamp (its `dataUpdatedAt`).
+   * called with the time the request that produced the settlement started — or
+   * its `dataUpdatedAt`, when the driver never saw that request leave. A shared
+   * request that begins before the drop and completes after it therefore still
+   * reads as older than the drop, which its completion timestamp would not.
    *
    * The replica drops an entry on purpose on `remove` and on a clear of its
    * scope, which empties the view but not the driver's cache. A driver that
