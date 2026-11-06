@@ -410,6 +410,32 @@ describe('createReactQueryDriver', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it('settles a hook on a success that followed its own failed run', async () => {
+    const failure = new Error('offline');
+    const fetcher = vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(['server a']);
+    const { first, second, wrapper } = sharedSetup(fetcher);
+
+    const firstError = vi.fn();
+    const firstDone = vi.fn();
+    const { result: a } = renderHook(
+      () => first.useReplica({ id: 'a' }, { onError: firstError, onSuccess: firstDone }),
+      { wrapper },
+    );
+    await waitFor(() => expect(firstError).toHaveBeenCalledTimes(1));
+    expect(a.current.data).toBeUndefined();
+
+    // The second replica retries the shared key and the query succeeds. The
+    // first hook's own run already ended in the failure above, so the success
+    // is not its own reported one: it has to settle on it instead of waiting
+    // for a run that already failed.
+    const secondDone = vi.fn();
+    renderHook(() => second.useReplica({ id: 'a' }, { onSuccess: secondDone }), { wrapper });
+
+    await waitFor(() => expect(firstDone).toHaveBeenCalledWith(['server a']));
+    expect(secondDone).toHaveBeenCalledWith(['server a']);
+    await waitFor(() => expect(a.current.data).toEqual(['server a']));
+  });
+
   it('does not replay a failure the query has since recovered from', async () => {
     const failure = new Error('offline');
     const fetcher = vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(['server a']);

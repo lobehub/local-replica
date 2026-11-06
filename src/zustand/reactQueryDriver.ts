@@ -306,6 +306,12 @@ export const createReactQueryDriver = ({
               ownErrorReported.current = true;
               reported.onError(error);
             }
+            // This run ended in a failure, so it will never produce a success
+            // settlement for the watch below to fold. Hand the ownership back:
+            // a replica that then retries the shared key reports its success
+            // through that watch, and claiming it as this run's own would leave
+            // this view empty on a query that succeeded.
+            ranOwnQuery.current = false;
             throw error;
           }
           report()?.onSuccess?.(data);
