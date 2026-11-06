@@ -640,11 +640,9 @@ describe('createReactQueryDriver', () => {
         refetch: vi.fn(),
       };
       const useQueryHook = vi.fn<ReactQueryLikeHook>(() => result);
-      const driver = createReactQueryDriver({
-        queryClient: new QueryClient(),
-        useQuery: useQueryHook,
-      });
-      return { driver, options: () => useQueryHook.mock.lastCall![0], result };
+      const client = new QueryClient();
+      const driver = createReactQueryDriver({ queryClient: client, useQuery: useQueryHook });
+      return { client, driver, options: () => useQueryHook.mock.lastCall![0], result };
     };
 
     it('maps the SWR-named schedule onto useQuery options', () => {
@@ -722,6 +720,23 @@ describe('createReactQueryDriver', () => {
       act(() => void result.current.mutate());
       expect(query.refetch).toHaveBeenCalledOnce();
       expect(options().enabled).toBe(true);
+    });
+
+    it('settles on the cached value, not on one an observer selected', () => {
+      const { client, driver, result: query } = capture();
+      const onSuccess = vi.fn();
+      const { rerender } = renderHook(() =>
+        driver.useQuery(['k'], async () => 'server', { onSuccess }),
+      );
+
+      // A default `select` on this key: the observer's `data` is the selected
+      // value, while the cache keeps what the fetcher returned.
+      client.setQueryData(['k'], { items: ['a'] });
+      query.data = ['a'];
+      query.dataUpdatedAt = 1;
+      rerender();
+
+      expect(onSuccess).toHaveBeenCalledExactlyOnceWith({ items: ['a'] });
     });
 
     it('replays a cached settlement when the replica reports no drop', () => {

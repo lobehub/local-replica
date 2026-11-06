@@ -11,6 +11,8 @@ interface ReactQueryLikeQuery {
 
 /** The parts of a TanStack Query `QueryClient` the driver calls. */
 export interface ReactQueryLikeClient {
+  /** The raw value the cache holds, before any `select` of an observer. */
+  getQueryData(queryKey: readonly unknown[]): any;
   getQueryCache(): {
     findAll(filters: { predicate: (query: ReactQueryLikeQuery) => boolean }): ReactQueryLikeQuery[];
   };
@@ -386,7 +388,15 @@ export const createReactQueryDriver = ({
         deliveredData.set(hash, dataId);
         // The query function hands TanStack `null` for an `undefined` response;
         // the callback gets what the fetcher returned.
-        callbacks.current?.onSuccess?.((result.data === null ? undefined : result.data) as T);
+        //
+        // Read it off the cache, not off `result.data`: an observer applies its
+        // `select` — including a default one set on this key — so the hook's
+        // `data` is a transformed value, while the replica that ran the query
+        // settled on the raw response. Handing the selected value over would
+        // settle two replicas of one query on two different shapes.
+        const cached = queryClient.getQueryData(key);
+        const settled = cached === undefined ? result.data : cached;
+        callbacks.current?.onSuccess?.((settled === null ? undefined : settled) as T);
       });
 
       // A failure this hook's own query function did not produce: TanStack
