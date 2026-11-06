@@ -912,6 +912,81 @@ describe('createReactQueryDriver', () => {
       expect(onSuccess).toHaveBeenCalledExactlyOnceWith('b after the drop');
     });
 
+    it('tracks one key written in another property order as one identity', () => {
+      const { driver, result: query } = capture();
+      const firstDone = vi.fn();
+      const secondDone = vi.fn();
+      const { rerender } = renderHook(() => {
+        driver.useQuery(['k', { page: 1, id: 'a' }], async () => 'server', {
+          onSuccess: firstDone,
+        });
+        driver.useQuery(['k', { id: 'a', page: 1 }], async () => 'server', {
+          onSuccess: secondDone,
+        });
+      });
+
+      // TanStack dedupes those two keys into one query, so the settlement is
+      // one settlement: the second hook must read the delivery the first one
+      // recorded instead of folding it again under a hash of its own.
+      query.data = 'cached';
+      query.dataUpdateCount = 1;
+      query.dataUpdatedAt = 1;
+      rerender();
+
+      expect(firstDone).toHaveBeenCalledExactlyOnceWith('cached');
+      expect(secondDone).not.toHaveBeenCalled();
+    });
+
+    it('holds back a failure whose request started before the drop', () => {
+      const { driver, result: query } = capture();
+      const onError = vi.fn();
+      const beforeDrop = new Error('before the drop');
+      const afterDrop = new Error('after the drop');
+      let now = 1000;
+      const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+      let droppedAt = 0;
+      const { rerender } = renderHook(() =>
+        driver.useQuery(['k'], async () => 'server', {
+          onError,
+          replayable: (settledAt) => settledAt > droppedAt,
+        }),
+      );
+
+      // A shared request leaves: this hook did not fetch it, but it sees it go.
+      now = 1100;
+      query.isFetching = true;
+      rerender();
+
+      // The replica drops the entry while that request is still in flight.
+      now = 2000;
+      droppedAt = now;
+
+      // It fails after the drop, so the failure is pre-drop work: folding it
+      // would run the recovery effects of a generation that never asked.
+      now = 3000;
+      query.isFetching = false;
+      query.error = beforeDrop;
+      query.errorUpdateCount = 1;
+      query.errorUpdatedAt = 3000;
+      rerender();
+      expect(onError).not.toHaveBeenCalled();
+
+      // A request that starts after the drop is a real failure.
+      now = 4000;
+      query.isFetching = true;
+      rerender();
+      now = 5000;
+      query.isFetching = false;
+      query.error = afterDrop;
+      query.errorUpdateCount = 2;
+      query.errorUpdatedAt = 5000;
+      rerender();
+
+      clock.mockRestore();
+
+      expect(onError).toHaveBeenCalledExactlyOnceWith(afterDrop);
+    });
+
     it('settles a second value that shares the first settlement timestamp', () => {
       const { driver, result: query } = capture();
       const onSuccess = vi.fn();

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
+import { stableQueryKey } from '../core/resource/storageKey';
 import type { ReplicaQueryOptions, ReplicaSyncDriver, ReplicaSyncSchedule } from './driver';
 
 /** The parts of a TanStack Query `Query` the driver reads. */
@@ -192,7 +193,7 @@ export const createReactQueryDriver = ({
               query.getObserversCount() > 0 &&
               match(query.queryKey) &&
               // A paused key is held, and this revalidate is one of the requests it holds.
-              !pausedHooks.has(JSON.stringify(query.queryKey)),
+              !pausedHooks.has(stableQueryKey(query.queryKey)),
           })
           .map((query) => query.fetch(undefined, { cancelRefetch: true }).catch(() => undefined)),
       ),
@@ -234,7 +235,11 @@ export const createReactQueryDriver = ({
       if (hook.current === 0) hook.current = ++hooks;
       // The key this hook currently holds a pause under, if any.
       const pausedIn = useRef<string | null>(null);
-      const hash = JSON.stringify(key);
+      // One identity per key, whatever order its params were written in:
+      // TanStack dedupes `{ id, page }` and `{ page, id }` into one query, so the
+      // driver's maps have to see them as one key too, or the hook that reads
+      // the sibling's settlement tracks it under a hash nobody else knows.
+      const hash = stableQueryKey(key);
       const paused = key !== null && (schedule.isPaused?.() ?? false);
       // One activation of the key per hook: the delivery memory it dedupes
       // against lives from this effect's setup to its cleanup, so a key that
@@ -354,6 +359,19 @@ export const createReactQueryDriver = ({
         ...toQueryOptions(schedule, once),
       });
 
+      // When the request over this key started, as this hook saw it leave. A
+      // shared query another replica fetched shows here too, and only that start
+      // says which side of a drop a settlement was computed on — for a failure as
+      // well as for a value, so both watches below read the same start and
+      // neither clears it: the request is over once it settles, and the reset
+      // after them is what closes its window.
+      useLayoutEffect(() => {
+        if (key === null) return;
+        if (result.isFetching && requestStartedAt.current === 0) {
+          requestStartedAt.current = Date.now();
+        }
+      });
+
       // A result this hook's own query function did not produce: a key shared
       // with another replica over the same `QueryClient` (TanStack dedupes the
       // fetch), or a cache still holding the value when this hook mounted. The
@@ -365,16 +383,10 @@ export const createReactQueryDriver = ({
         const dataAt = result.dataUpdatedAt ?? 0;
         const dataId = settlementId(result.dataUpdateCount, result.dataUpdatedAt);
         if (key === null) return;
-        // Whether a request over this key is in flight, and when it started as
-        // this hook saw it. A shared query another replica fetched shows here
-        // too: its settlement lands below without this hook's own run, and only
-        // the start says which side of a drop the response was computed on.
+        // When the request behind this settlement started; `0` when this hook
+        // never saw it leave (it mounted on a cache that holds no settlement in
+        // flight), which leaves the gate below on the settlement's own time.
         const startedAt = requestStartedAt.current;
-        if (result.isFetching) {
-          if (startedAt === 0) requestStartedAt.current = Date.now();
-        } else if (startedAt !== 0) {
-          requestStartedAt.current = 0;
-        }
         if (ranOwnQuery.current) {
           // The settlement this hook's own run produced: its callback already ran
           // from the query function. Record it so a sibling hook of the same key
@@ -440,8 +452,26 @@ export const createReactQueryDriver = ({
           return;
         }
         if (deliveredError.get(hash) === errorId) return;
+        // The replica dropped this entry after the failure was cached (`remove`,
+        // or a clear of its scope) — the failure twin of the gate above. A
+        // request that began before the drop failed on the pre-drop side of it,
+        // and delivering it would fold the failure into a generation that never
+        // asked for it: stale recovery or purge effects would run after the
+        // clear. Hold it back, and record it so a later render does not
+        // readmit it once the start of its request is no longer at hand.
+        const startedAt = requestStartedAt.current;
+        const settledAt = startedAt > 0 && startedAt < errorAt ? startedAt : errorAt;
+        if (replayable && !replayable(settledAt)) return;
         deliveredError.set(hash, errorId);
         callbacks.current?.onError?.(result.error);
+      });
+
+      // The request that produced the settlement above is over: close the window
+      // both watches read, after they have read it. A request still in flight
+      // keeps its start for the settlement it has yet to produce.
+      useLayoutEffect(() => {
+        if (key === null) return;
+        if (!result.isFetching && requestStartedAt.current !== 0) requestStartedAt.current = 0;
       });
 
       return {
