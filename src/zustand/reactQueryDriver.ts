@@ -8,6 +8,8 @@ interface ReactQueryLikeQuery {
   fetch(options?: undefined, fetchOptions?: { cancelRefetch?: boolean }): Promise<unknown>;
   getObserversCount(): number;
   queryKey: readonly unknown[];
+  /** The query's state; `seed` reads the settlement id the cache write published. */
+  state?: { dataUpdateCount?: number; dataUpdatedAt?: number };
 }
 
 /** The parts of a TanStack Query `QueryClient` the driver calls. */
@@ -43,6 +45,28 @@ export type ReactQueryLikeHook = (options: any) => {
 
 /** Query key of a sync with no key: never fetched, so it never shares data. */
 const DISABLED_KEY = ['local-replica', 'disabled'] as const;
+
+/**
+ * When a fetch over a key was replaced while it was in flight, per `QueryClient`.
+ *
+ * `cancelRefetch` cancels the running fetch and starts its replacement without
+ * ever publishing an idle state, so `isFetching` stays true across the swap and
+ * a hook's own stamp would keep the start of the request the replacement
+ * supersedes. A response the replacement produces after a drop would then be
+ * judged by the pre-drop start and refused. The replacement is a fresh start,
+ * and it happens on the shared cache, so it is recorded where every driver over
+ * the same client reads it.
+ */
+const replacedFetches = new WeakMap<ReactQueryLikeClient, Map<string, number>>();
+
+/** The replacement starts recorded for one client, created on first use. */
+const replacedFetchesOf = (client: ReactQueryLikeClient) => {
+  const existing = replacedFetches.get(client);
+  if (existing) return existing;
+  const created = new Map<string, number>();
+  replacedFetches.set(client, created);
+  return created;
+};
 
 /**
  * Identity of a settlement: the update count when the hook reports one, the
@@ -145,6 +169,14 @@ export const createReactQueryDriver = ({
    */
   const deliveredError = new Map<string, number>();
 
+  /**
+   * `dataUpdatedAt` of the settlement a `seed` published for each key, the
+   * timestamp twin of the mark `seed` writes into `deliveredData`: the hook's
+   * settlement identity falls back to the timestamp where it exposes no update
+   * count, so the seed has to be recognised under either identity.
+   */
+  const seededAt = new Map<string, number>();
+
   /** Hooks currently showing each key; the last one to leave ends its activation. */
   const activeKeyHooks = new Map<string, Set<number>>();
 
@@ -170,6 +202,7 @@ export const createReactQueryDriver = ({
     // pending, so a later activation starts from the cache again.
     deliveredData.delete(keyHash);
     deliveredError.delete(keyHash);
+    seededAt.delete(keyHash);
   };
 
   /** Take or release one hook's hold on a key; a key is held while its set is not empty. */
@@ -195,7 +228,13 @@ export const createReactQueryDriver = ({
               // A paused key is held, and this revalidate is one of the requests it holds.
               !pausedHooks.has(stableQueryKey(query.queryKey)),
           })
-          .map((query) => query.fetch(undefined, { cancelRefetch: true }).catch(() => undefined)),
+          .map((query) => {
+            // A fetch already in flight is replaced by this one, and a replacement
+            // is a new start: record it so a hook judging a later settlement reads
+            // when the surviving request began, not when the first one did.
+            replacedFetchesOf(queryClient).set(stableQueryKey(query.queryKey), Date.now());
+            return query.fetch(undefined, { cancelRefetch: true }).catch(() => undefined);
+          }),
       ),
     // TanStack leaves the cache untouched when `setQueryData` receives
     // `undefined`, so an absent response would settle nothing and a hook on the
@@ -203,6 +242,22 @@ export const createReactQueryDriver = ({
     // function above, which stores `null` for the same reason.
     seed: (key, data) => {
       queryClient.setQueryData(key, data === undefined ? null : data);
+      // The write publishes a settlement, but no query function ran for it: the
+      // replica that called `seed` already applied this response itself. Mark it
+      // delivered for this driver, or a hook showing the key folds it again and
+      // the slice applies the same response twice, repeating its effects. Only
+      // while the key is held: an unheld key's entry would outlive its activation
+      // and suppress the replay a later mount needs.
+      const keyHash = stableQueryKey(key);
+      if (!activeKeyHooks.has(keyHash)) return;
+      const state = queryClient
+        .getQueryCache()
+        .findAll({ predicate: (query) => stableQueryKey(query.queryKey) === keyHash })
+        .map((query) => query.state)
+        .find((candidate) => candidate !== undefined);
+      if (!state) return;
+      deliveredData.set(keyHash, settlementId(state.dataUpdateCount, state.dataUpdatedAt));
+      if (state.dataUpdatedAt) seededAt.set(keyHash, state.dataUpdatedAt);
     },
     useQuery: <T>(
       key: readonly unknown[] | null,
@@ -240,6 +295,15 @@ export const createReactQueryDriver = ({
       // driver's maps have to see them as one key too, or the hook that reads
       // the sibling's settlement tracks it under a hash nobody else knows.
       const hash = stableQueryKey(key);
+      /**
+       * When the request behind a settlement over this key began: this hook's own
+       * stamp, or a later replacement of that fetch. `cancelRefetch` swaps the
+       * request without publishing an idle state, so the stamp alone would keep
+       * the start of the request the replacement superseded and hold a valid
+       * post-drop response back.
+       */
+      const requestStart = () =>
+        Math.max(requestStartedAt.current, replacedFetchesOf(queryClient).get(hash) ?? 0);
       const paused = key !== null && (schedule.isPaused?.() ?? false);
       // One activation of the key per hook: the delivery memory it dedupes
       // against lives from this effect's setup to its cleanup, so a key that
@@ -386,7 +450,7 @@ export const createReactQueryDriver = ({
         // When the request behind this settlement started; `0` when this hook
         // never saw it leave (it mounted on a cache that holds no settlement in
         // flight), which leaves the gate below on the settlement's own time.
-        const startedAt = requestStartedAt.current;
+        const startedAt = requestStart();
         if (ranOwnQuery.current) {
           // The settlement this hook's own run produced: its callback already ran
           // from the query function. Record it so a sibling hook of the same key
@@ -400,6 +464,12 @@ export const createReactQueryDriver = ({
           return;
         }
         if (dataAt === 0 || dataId === seen.current || deliveredData.get(hash) === dataId) return;
+        // The settlement `seed` published for a response this replica already
+        // applied: folding it again would apply the same response twice.
+        if (seededAt.get(hash) === dataAt) {
+          seen.current = dataId;
+          return;
+        }
         // The replica dropped this entry after the value was cached (`remove`,
         // or a clear of its scope). The cache still holds it, but replaying it
         // would put the dropped entry back on screen; leave the view empty until
@@ -459,7 +529,7 @@ export const createReactQueryDriver = ({
         // asked for it: stale recovery or purge effects would run after the
         // clear. Hold it back, and record it so a later render does not
         // readmit it once the start of its request is no longer at hand.
-        const startedAt = requestStartedAt.current;
+        const startedAt = requestStart();
         const settledAt = startedAt > 0 && startedAt < errorAt ? startedAt : errorAt;
         if (replayable && !replayable(settledAt)) return;
         deliveredError.set(hash, errorId);

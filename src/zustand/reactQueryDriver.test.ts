@@ -326,6 +326,64 @@ describe('createReactQueryDriver', () => {
     expect(queryClient.getQueryData(['k'])).toBeNull();
   });
 
+  it('does not settle a seeded response a second time in the replica that fetched it', async () => {
+    const { replica, wrapper } = setup();
+    const onSuccess = vi.fn();
+
+    const { result } = renderHook(() => replica.useReplica({ id: 'a' }, { onSuccess }), {
+      wrapper,
+    });
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledExactlyOnceWith(['server a']));
+
+    // An idle key: `fetch` applies the response to the slice itself and then
+    // seeds the cache. The seed publishes another settlement of the same
+    // response, which the hook must not fold — that would settle twice.
+    await act(async () => {
+      await replica.fetch({ id: 'a' });
+    });
+    await waitFor(() => expect(result.current.data).toEqual(['server a']));
+
+    expect(onSuccess).toHaveBeenCalledExactlyOnceWith(['server a']);
+  });
+
+  it('judges a replaced fetch by its own start after the observing replica dropped the key', async () => {
+    const requests: { promise: Promise<string[]>; resolve: (value: string[]) => void }[] = [];
+    const fetcher = vi.fn(() => {
+      const next = deferred<string[]>();
+      requests.push(next);
+      return next.promise;
+    });
+    const { first, second, wrapper } = sharedSetup(fetcher);
+
+    // The executing replica paints the first value; the observing one shares it.
+    renderHook(() => first.useReplica({ id: 'a' }, {}), { wrapper });
+    await act(async () => requests[0].resolve(['first']));
+    const seen = vi.fn();
+    const { result } = renderHook(
+      () => second.useReplica({ id: 'a' }, { onSuccess: seen, revalidateIfStale: false }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.data).toEqual(['first']));
+
+    // A background fetch starts on the shared key, then this replica drops the
+    // entry under it, then it revalidates and replaces that fetch in flight.
+    await act(async () => {
+      void first.revalidate('a');
+    });
+    await act(async () => {
+      void second.clear();
+    });
+    await act(async () => {
+      void second.revalidate('a');
+    });
+
+    const last = requests[requests.length - 1];
+    await act(async () => last.resolve(['after drop']));
+
+    await waitFor(() => expect(result.current.data).toEqual(['after drop']));
+    expect(seen).toHaveBeenLastCalledWith(['after drop']);
+  });
+
   it('settles a hook whose replica shares the query a second instance fetched', async () => {
     const { fetcher, first, second, wrapper } = sharedSetup();
 
