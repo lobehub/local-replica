@@ -47,6 +47,22 @@ export type ReactQueryLikeHook = (options: any) => {
 const DISABLED_KEY = ['local-replica', 'disabled'] as const;
 
 /**
+ * What a replaced fetch left behind: where its replacement started, and the
+ * settlement that replacement produced, once one has been judged by it.
+ *
+ * A bare start would outlive the request it describes and be applied to any
+ * later settlement over the same key — including one from a fetch that started
+ * after a drop, which it would then refuse as pre-drop data. The settlement it
+ * claimed scopes the start to the one request the record is about.
+ */
+interface ReplacedFetch {
+  /** The settlement this replacement produced, once a hook has judged one. */
+  settledFor?: number;
+  /** When the replacement started. */
+  start: number;
+}
+
+/**
  * When a fetch over a key was replaced while it was in flight, per `QueryClient`.
  *
  * `cancelRefetch` cancels the running fetch and starts its replacement without
@@ -57,13 +73,13 @@ const DISABLED_KEY = ['local-replica', 'disabled'] as const;
  * and it happens on the shared cache, so it is recorded where every driver over
  * the same client reads it.
  */
-const replacedFetches = new WeakMap<ReactQueryLikeClient, Map<string, number>>();
+const replacedFetches = new WeakMap<ReactQueryLikeClient, Map<string, ReplacedFetch>>();
 
 /** The replacement starts recorded for one client, created on first use. */
 const replacedFetchesOf = (client: ReactQueryLikeClient) => {
   const existing = replacedFetches.get(client);
   if (existing) return existing;
-  const created = new Map<string, number>();
+  const created = new Map<string, ReplacedFetch>();
   replacedFetches.set(client, created);
   return created;
 };
@@ -231,8 +247,11 @@ export const createReactQueryDriver = ({
           .map((query) => {
             // A fetch already in flight is replaced by this one, and a replacement
             // is a new start: record it so a hook judging a later settlement reads
-            // when the surviving request began, not when the first one did.
-            replacedFetchesOf(queryClient).set(stableQueryKey(query.queryKey), Date.now());
+            // when the surviving request began, not when the first one did. It
+            // speaks for the one settlement this fetch produces (see `requestStart`).
+            replacedFetchesOf(queryClient).set(stableQueryKey(query.queryKey), {
+              start: Date.now(),
+            });
             return query.fetch(undefined, { cancelRefetch: true }).catch(() => undefined);
           }),
       ),
@@ -302,9 +321,25 @@ export const createReactQueryDriver = ({
        * request without publishing an idle state, so the stamp alone would keep
        * the start of the request the replacement superseded and hold a valid
        * post-drop response back.
+       *
+       * A replacement record speaks for the settlement its fetch produces, and
+       * stops there: a settlement after that one came from a fetch that started
+       * later, and applying the remembered start to it would refuse a response
+       * computed after its own drop.
        */
-      const requestStart = () =>
-        Math.max(requestStartedAt.current, replacedFetchesOf(queryClient).get(hash) ?? 0);
+      const requestStart = (settlement: number) => {
+        const replaced = replacedFetchesOf(queryClient).get(hash);
+        if (!replaced) return requestStartedAt.current;
+        // The record speaks for the settlement its own fetch produces: the first
+        // one judged against it. A later settlement came from a fetch that
+        // started afterwards, and applying the remembered start to it would
+        // refuse a response computed after its own drop.
+        if (replaced.settledFor !== undefined && replaced.settledFor !== settlement) {
+          return requestStartedAt.current;
+        }
+        replaced.settledFor = settlement;
+        return Math.max(requestStartedAt.current, replaced.start);
+      };
       const paused = key !== null && (schedule.isPaused?.() ?? false);
       // One activation of the key per hook: the delivery memory it dedupes
       // against lives from this effect's setup to its cleanup, so a key that
@@ -448,10 +483,6 @@ export const createReactQueryDriver = ({
         const dataAt = result.dataUpdatedAt ?? 0;
         const dataId = settlementId(result.dataUpdateCount, result.dataUpdatedAt);
         if (key === null) return;
-        // When the request behind this settlement started; `0` when this hook
-        // never saw it leave (it mounted on a cache that holds no settlement in
-        // flight), which leaves the gate below on the settlement's own time.
-        const startedAt = requestStart();
         if (ranOwnQuery.current) {
           // The settlement this hook's own run produced: its callback already ran
           // from the query function. Record it so a sibling hook of the same key
@@ -478,6 +509,10 @@ export const createReactQueryDriver = ({
         // A response whose request began before the entry was dropped holds
         // pre-drop data even though it completes after the drop, so the gate
         // reads the request's start rather than its completion.
+        // When the request behind this settlement started; `0` when this hook
+        // never saw it leave (it mounted on a cache that holds no settlement in
+        // flight), which leaves the gate below on the settlement's own time.
+        const startedAt = requestStart(dataId);
         const settledAt = startedAt > 0 && startedAt < dataAt ? startedAt : dataAt;
         if (replayable && !replayable(settledAt)) {
           // Let this settlement go: the replica dropped what it would put back.
@@ -530,7 +565,7 @@ export const createReactQueryDriver = ({
         // asked for it: stale recovery or purge effects would run after the
         // clear. Hold it back, and record it so a later render does not
         // readmit it once the start of its request is no longer at hand.
-        const startedAt = requestStart();
+        const startedAt = requestStart(errorId);
         const settledAt = startedAt > 0 && startedAt < errorAt ? startedAt : errorAt;
         if (replayable && !replayable(settledAt)) return;
         deliveredError.set(hash, errorId);

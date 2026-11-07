@@ -373,12 +373,64 @@ describe('createReactQueryDriver', () => {
     await act(async () => {
       void second.clear();
     });
+    // The gate compares wall-clock stamps: a request that starts in the same
+    // millisecond as the clear is on neither side of it, so give the drop its own.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
     await act(async () => {
       void second.revalidate('a');
     });
 
     const last = requests[requests.length - 1];
     await act(async () => last.resolve(['after drop']));
+
+    await waitFor(() => expect(result.current.data).toEqual(['after drop']));
+    expect(seen).toHaveBeenLastCalledWith(['after drop']);
+  });
+
+  it('judges a settlement a later fetch produced by that fetch, not an earlier replacement', async () => {
+    const requests: { promise: Promise<string[]>; resolve: (value: string[]) => void }[] = [];
+    const fetcher = vi.fn(() => {
+      const next = deferred<string[]>();
+      requests.push(next);
+      return next.promise;
+    });
+    const { first, second, wrapper } = sharedSetup(fetcher);
+
+    renderHook(() => first.useReplica({ id: 'a' }, {}), { wrapper });
+    await act(async () => requests[0].resolve(['first']));
+    const seen = vi.fn();
+    const { result } = renderHook(
+      () => second.useReplica({ id: 'a' }, { onSuccess: seen, revalidateIfStale: false }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.data).toEqual(['first']));
+
+    // A revalidate replaces the fetch in flight and records when its replacement
+    // started — before this replica drops the entry.
+    await act(async () => {
+      void first.revalidate('a');
+    });
+    await act(async () => requests[1].resolve(['replaced']));
+    await waitFor(() => expect(result.current.data).toEqual(['replaced']));
+
+    await act(async () => {
+      void second.clear();
+    });
+    // The gate compares wall-clock stamps: a fetch that starts in the same
+    // millisecond as the clear is neither side of it, so give the drop its own.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
+
+    // A later fetch starts after the drop and settles on its own. The recorded
+    // start belongs to the request above; judging this settlement by it would
+    // refuse a response the drop never saw and leave the view stale.
+    await act(async () => {
+      void first.fetch({ id: 'a' });
+    });
+    await act(async () => requests[2].resolve(['after drop']));
 
     await waitFor(() => expect(result.current.data).toEqual(['after drop']));
     expect(seen).toHaveBeenLastCalledWith(['after drop']);
