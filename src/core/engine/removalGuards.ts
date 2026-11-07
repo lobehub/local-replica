@@ -30,16 +30,27 @@ export const createRemovalGuards = () => {
    * half of the same question — a value cached *before* the removal must not be
    * replayed to a later mount — see the engine's `droppedAt`.
    *
-   * Bounded like the tombstones; an evicted key reads 0, which only ever drops a
-   * response (the next revalidate refetches), never admits one.
+   * Bounded like the tombstones. An evicted key reads generation 0, which only
+   * ever drops a response (the next revalidate refetches), never admits one.
    */
   const removalGenerations = new Map<string, { at: number; generation: number }>();
+  /**
+   * Stamp of the most recently evicted removal. A watermark miss cannot read 0
+   * the way a generation miss can: 0 means "never removed", which is exactly the
+   * answer that lets a value cached *before* an evicted removal replay to a later
+   * mount and resurrect it. Entries are re-inserted on every removal and stamped
+   * with a monotonic clock, so the evicted one always holds the oldest stamp —
+   * using it as the floor for a miss only drops settlements that could predate
+   * the eviction, and a dropped replay costs a fetch while an admitted one
+   * restores the data the removal just dropped.
+   */
+  let evictedWatermark = 0;
   const removalId = (scope: string, key: string) => `${scope}\u0000${key}`;
   const removalGeneration = (scope: string, key: string) =>
     removalGenerations.get(removalId(scope, key))?.generation ?? 0;
-  /** When `scope`/`key` was last removed, or `0` if it never was. */
+  /** When `scope`/`key` was last removed, or the eviction floor if it never was. */
   const removalWatermark = (scope: string, key: string) =>
-    removalGenerations.get(removalId(scope, key))?.at ?? 0;
+    removalGenerations.get(removalId(scope, key))?.at ?? evictedWatermark;
   const markRemoved = (scope: string, key: string) => {
     removedEntries.add(scope, key);
     const id = removalId(scope, key);
@@ -47,8 +58,13 @@ export const createRemovalGuards = () => {
     // Re-insert so the map's insertion order is least-recently-removed first.
     removalGenerations.delete(id);
     removalGenerations.set(id, { at: Date.now(), generation: next });
-    if (removalGenerations.size > DEFAULT_REMOVAL_TOMBSTONE_LIMIT)
-      removalGenerations.delete(removalGenerations.keys().next().value as string);
+    if (removalGenerations.size > DEFAULT_REMOVAL_TOMBSTONE_LIMIT) {
+      // `Map` iterates in insertion order, so the first key is the oldest stamp.
+      const oldest = removalGenerations.keys().next().value as string;
+      // Remember where the watermark left off before dropping its entry.
+      evictedWatermark = Math.max(evictedWatermark, removalGenerations.get(oldest)!.at);
+      removalGenerations.delete(oldest);
+    }
   };
   const clearRemoved = (scope: string, key: string) => {
     removedEntries.clear(scope, key);
