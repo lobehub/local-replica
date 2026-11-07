@@ -30,6 +30,14 @@ export const createScopeClear = <TData>({
   const clearGenerations = new Map<string, number>();
   const clearGeneration = (scope: string) => clearGenerations.get(scope) ?? 0;
   /**
+   * When each scope was last cleared, `0` if never. The generation drops what
+   * was in flight; the stamp also drops what was already cached — a value
+   * settled before the clear must not be replayed to a later mount (see the
+   * engine's `droppedAt`).
+   */
+  const clearWatermarks = new Map<string, number>();
+  const clearWatermark = (scope: string) => clearWatermarks.get(scope) ?? 0;
+  /**
    * The persisted-row purge of the last `clear()` per scope: `true` once every
    * row delete landed. A hydrate waits for it, and refuses to read while the
    * purge failed (an untrusted scope, a storage error) so a wiped resource can
@@ -49,6 +57,7 @@ export const createScopeClear = <TData>({
   const clear = (): Promise<boolean> => {
     const scope = resource.scope.get();
     clearGenerations.set(scope, clearGeneration(scope) + 1);
+    clearWatermarks.set(scope, Date.now());
     port.commit([{ type: 'clear' }], { entries: {}, scope }, `${prefix}/clear`);
     rows.forgetScope(scope);
     const purge = purgeScope(scope);
@@ -70,6 +79,7 @@ export const createScopeClear = <TData>({
   const clearScope = (scope: string): Promise<boolean> => {
     if (scope === resource.scope.get()) return clear();
     clearGenerations.set(scope, clearGeneration(scope) + 1);
+    clearWatermarks.set(scope, Date.now());
     const purge = purgeScope(scope);
     scopePurges.set(scope, purge);
     return purge;
@@ -96,5 +106,5 @@ export const createScopeClear = <TData>({
     return first && rest;
   };
 
-  return { clear, clearGeneration, clearScope, lastPurge };
+  return { clear, clearGeneration, clearScope, clearWatermark, lastPurge };
 };

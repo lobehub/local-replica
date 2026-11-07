@@ -3,7 +3,7 @@ import { useState } from 'react';
 
 import styles from './write.module.css';
 
-type Stack = 'effect' | 'swr' | 'swrStore';
+type Stack = 'effect' | 'reactQuery' | 'swr' | 'swrStore';
 
 interface Step {
   code: string;
@@ -31,6 +31,16 @@ const CREATE_HOOK: Step = {
 });`,
   description:
     'No store to add: the hook keeps the replica for you and returns the data, like useSWR.',
+  language: 'ts',
+  title: 'Create the hook',
+};
+
+const CREATE_HOOK_REACT_QUERY: Step = {
+  code: `export const { useReplica: useTopics } = createReplica(topics, {
+  driver: createReactQueryDriver({ queryClient, useQuery }), // your QueryClient
+});`,
+  description:
+    'No store to add: the hook keeps the replica for you and returns the data, like useQuery.',
   language: 'ts',
   title: 'Create the hook',
 };
@@ -95,6 +105,35 @@ const STACKS: Record<Stack, { label: string; steps: Step[]; today: string; today
   }`,
         description:
           'Same shape as useSWR: data, error, isValidating. The difference is a copy that survives reloads.',
+        language: 'diff',
+        title: 'Swap the hook',
+      },
+    ],
+  },
+  reactQuery: {
+    label: 'React Query',
+    today: `function TopicList({ agentId }) {
+  const { data: topics } = useQuery({
+    queryKey: ['topics', agentId],
+    queryFn: () => api.getTopics(agentId),
+  });
+  return <List items={topics} />;
+}`,
+    todayNote: 'In-memory cache: instant on revisit, empty after a reload.',
+    steps: [
+      DESCRIBE,
+      CREATE_HOOK_REACT_QUERY,
+      {
+        code: `  function TopicList({ agentId }) {
+-   const { data: topics } = useQuery({
+-     queryKey: ['topics', agentId],
+-     queryFn: () => api.getTopics(agentId),
+-   });
++   const { data: topics } = useTopics({ agentId });
+    return <List items={topics} />;
+  }`,
+        description:
+          'The same QueryClient still schedules the requests. The difference is a copy that survives reloads.',
         language: 'diff',
         title: 'Swap the hook',
       },

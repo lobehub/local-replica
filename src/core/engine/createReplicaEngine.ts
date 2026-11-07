@@ -44,8 +44,15 @@ export const createReplicaEngine = <TParams, TData, TFetched = TData>(
   const loadingMore = new Set<string>();
 
   // ---- removal guards (see `removalGuards.ts`) -----------------------------
-  const { clearRemoved, isPurged, isRemoved, markPurged, markRemoved, removalGeneration } =
-    createRemovalGuards();
+  const {
+    clearRemoved,
+    isPurged,
+    isRemoved,
+    markPurged,
+    markRemoved,
+    removalGeneration,
+    removalWatermark,
+  } = createRemovalGuards();
   const entityGuards = createEntityRemovalGuards();
 
   const getSlot = port.getState;
@@ -75,13 +82,26 @@ export const createReplicaEngine = <TParams, TData, TFetched = TData>(
   const { deleteRows, removeStoredVariants, retain, touchStorageKey } = rows;
 
   // ---- resource-wide clear (see `scopeClear.ts`) ---------------------------
-  const { clear, clearGeneration, clearScope, lastPurge } = createScopeClear<TData>({
+  const { clear, clearGeneration, clearScope, clearWatermark, lastPurge } = createScopeClear<TData>({
     port,
     prefix,
     resource,
     rows,
     writeQueue,
   });
+
+  /**
+   * When the entry's value was last dropped on purpose — `remove`, or a clear of
+   * its scope — or `0` if it never was.
+   *
+   * The view is emptied by the drop, but a query cache outside the engine (a
+   * driver's) still holds the value and may replay it to the next mount, which
+   * would put the dropped entry back on screen. A driver that settles a hook on
+   * a cached result compares that result's timestamp against this watermark and
+   * skips an older one (see `ReplicaQueryOptions.replayable`).
+   */
+  const droppedAt = (scope: string, key: string) =>
+    Math.max(clearWatermark(scope), removalWatermark(scope, key));
 
   const runEffects = (effects: ReplicaEffect<TData>[]) => {
     if (!writeQueue || effects.length === 0) return;
@@ -533,6 +553,7 @@ export const createReplicaEngine = <TParams, TData, TFetched = TData>(
     removalGeneration,
     collapse,
     dispatch,
+    droppedAt,
     ensureScope,
     entityKeys,
     fetcher,

@@ -133,7 +133,7 @@ local-replica 刻意**不做**离线写入队列、冲突合并（CRDT / OT）�
 npm i local-replica
 ```
 
-`react` 和 `zustand` 是可选的 peer 依赖：`local-replica/react` 需要 `react`，`local-replica/zustand` 两者都需要。两种绑定都通过 driver 调度请求，`createSWRDriver` 需要 `swr`。核心入口与框架无关。
+`react` 和 `zustand` 是可选的 peer 依赖：`local-replica/react` 需要 `react`，`local-replica/zustand` 两者都需要。两种绑定都通过 driver 调度请求：`createSWRDriver` 需要 `swr`，`createReactQueryDriver` 需要 `@tanstack/react-query` v5。核心入口与框架无关。
 
 ## 分层
 
@@ -173,6 +173,8 @@ function TopicList({ agentId }) {
   return <List items={topics} />;
 }
 ```
+
+用的是 React Query？把 driver 换成你的 client 即可：`driver: createReactQueryDriver({ queryClient, useQuery })`，其中 `useQuery` 来自 `@tanstack/react-query`。
 
 `createReplica` 返回的对象上还有 `optimistic`、`remove`、`fetch`、`read(params)` 等 slice 方法。
 

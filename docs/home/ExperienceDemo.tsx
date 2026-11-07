@@ -66,7 +66,7 @@ const APPROACHES: Record<Kind, Approach> = {
     optimistic: false,
     subtitle: 'in-memory cache, stale-while-revalidate',
     syncLabel: 'Revalidating',
-    title: 'SWR',
+    title: 'SWR / React Query',
   },
 };
 

@@ -133,7 +133,7 @@ local-replica deliberately does **not** queue writes while offline, merge confli
 npm i local-replica
 ```
 
-`react` and `zustand` are optional peers: `local-replica/react` needs `react`, `local-replica/zustand` needs both. Both bindings schedule requests through a driver, and `createSWRDriver` needs `swr`. The core entry is framework-agnostic.
+`react` and `zustand` are optional peers: `local-replica/react` needs `react`, `local-replica/zustand` needs both. Both bindings schedule requests through a driver: `createSWRDriver` needs `swr`, `createReactQueryDriver` needs `@tanstack/react-query` v5. The core entry is framework-agnostic.
 
 ## Layers
 
@@ -173,6 +173,8 @@ function TopicList({ agentId }) {
   return <List items={topics} />;
 }
 ```
+
+Using React Query? Pass your client instead: `driver: createReactQueryDriver({ queryClient, useQuery })`, with `useQuery` from `@tanstack/react-query`.
 
 The object `createReplica` returns also carries `optimistic`, `remove`, `fetch`, `read(params)` and the other slice methods.
 

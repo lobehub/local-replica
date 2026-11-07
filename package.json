@@ -65,6 +65,7 @@
     "@lobehub/semantic-release-config": "^2.1.7",
     "@lobehub/ui": "^6.9.0",
     "@react-router/dev": "^8.5.0",
+    "@tanstack/react-query": "^5.105.0",
     "@testing-library/react": "^16.3.3",
     "@types/react": "^19.3.0",
     "@vitest/coverage-v8": "^5.0.5",
