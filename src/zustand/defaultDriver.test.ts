@@ -2,6 +2,7 @@
  * @vitest-environment happy-dom
  */
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { defineReplica } from '../core/resource/defineReplica';
@@ -221,6 +222,17 @@ describe('createDefaultDriver', () => {
       await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
     });
 
+    it('keeps the mount hold when React replays the effect in StrictMode', async () => {
+      const driver = createDefaultDriver();
+      const fetcher = vi.fn(async () => 'value');
+      renderHook(() => driver.useQuery(['k'], fetcher, { revalidateOnMount: false }), {
+        wrapper: StrictMode,
+      });
+      await act(async () => undefined);
+
+      expect(fetcher).not.toHaveBeenCalled();
+    });
+
     it('holds every request while isPaused', async () => {
       let paused = true;
       const { driver, fetcher, result } = mount({ options: { isPaused: () => paused } });
@@ -325,6 +337,24 @@ describe('createDefaultDriver', () => {
       const stopped = fetcher.mock.calls.length;
       await act(async () => new Promise((resolve) => setTimeout(resolve, 40)));
       expect(fetcher.mock.calls.length).toBe(stopped);
+    });
+
+    it('waits for a slow polled request to settle before starting the next one', async () => {
+      let inflight = 0;
+      let peak = 0;
+      const onSuccess = vi.fn();
+      const fetcher = vi.fn(async () => {
+        inflight++;
+        peak = Math.max(peak, inflight);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        inflight--;
+        return 'value';
+      });
+      mount({ fetcher, options: { dedupingInterval: 0, refreshInterval: 10, onSuccess } });
+
+      // A second tick only happens after the first request settled.
+      await waitFor(() => expect(onSuccess.mock.calls.length).toBeGreaterThanOrEqual(2));
+      expect(peak).toBe(1);
     });
 
     it('keeps polling offline with refreshWhenOffline', async () => {

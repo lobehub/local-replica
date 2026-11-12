@@ -205,6 +205,9 @@ export const createDefaultDriver = (): ReplicaSyncDriver => {
 
       // Show the key: fetch it as the schedule allows, and revalidate it while shown.
       const activated = useRef(false);
+      // The key `revalidateOnMount: false` held at mount. Kept per key so React StrictMode's
+      // replay of the same effect (same key, same mount) stays held, while a later key fetches.
+      const heldKey = useRef<string | null>(null);
       useEffect(() => {
         if (hash === null || entry === null) return;
         const current = subscriber.current!;
@@ -216,7 +219,8 @@ export const createDefaultDriver = (): ReplicaSyncDriver => {
         activated.current = true;
         const cached = entry.hasData && (once || revalidateIfStale === false);
         // Like SWR, `revalidateOnMount: false` only holds the first key a hook shows.
-        const held = first && revalidateOnMount === false;
+        const held = heldKey.current === hash || (first && revalidateOnMount === false);
+        if (held) heldKey.current = hash;
         if (!cached && !held) void start(hash, entry, current, true).catch(noop);
         return () => {
           entry.subscribers.delete(current);
@@ -236,20 +240,33 @@ export const createDefaultDriver = (): ReplicaSyncDriver => {
       useEffect(() => {
         if (hash === null || entry === null || !polling) return;
         let timer: ReturnType<typeof setTimeout>;
+        let stopped = false;
         const schedule = () => {
+          if (stopped) return;
           const { refreshInterval: interval, refreshWhenHidden, refreshWhenOffline } =
             subscriber.current!.options;
           const ms = typeof interval === 'function' ? interval(entry.snapshot.data) : interval;
           if (!ms) return;
           timer = setTimeout(() => {
-            if ((refreshWhenHidden || !isDocumentHidden()) && (refreshWhenOffline || !isOffline())) {
-              void start(hash, entry, subscriber.current!, true).catch(noop);
+            if (stopped) return;
+            const allowed =
+              (refreshWhenHidden || !isDocumentHidden()) && (refreshWhenOffline || !isOffline());
+            // Never overlap the request this key already has in flight (the mount fetch or a
+            // previous tick), and wait for the one this tick starts before scheduling the
+            // next: a request slower than `refreshInterval` would otherwise be replaced
+            // before it could report, leaving `isValidating` up and the callbacks swallowed.
+            if (!allowed || entry.inflight) {
+              schedule();
+              return;
             }
-            schedule();
+            void start(hash, entry, subscriber.current!, true).catch(noop).then(schedule);
           }, ms);
         };
         schedule();
-        return () => clearTimeout(timer);
+        return () => {
+          stopped = true;
+          clearTimeout(timer);
+        };
       }, [hash, polling]);
 
       return {
