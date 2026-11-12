@@ -133,7 +133,7 @@ local-replica 刻意**不做**离线写入队列、冲突合并（CRDT / OT）�
 npm i local-replica
 ```
 
-`react` 和 `zustand` 是可选的 peer 依赖：`local-replica/react` 需要 `react`，`local-replica/zustand` 两者都需要。两种绑定都通过 driver 调度请求：`createSWRDriver` 需要 `swr`，`createReactQueryDriver` 需要 `@tanstack/react-query` v5。核心入口与框架无关。
+`react` 和 `zustand` 是可选的 peer 依赖：`local-replica/react` 需要 `react`，`local-replica/zustand` 两者都需要。两种绑定都通过 driver 调度请求：内置 driver 不需要任何依赖，`createSWRDriver` 需要 `swr`，`createReactQueryDriver` 需要 `@tanstack/react-query` v5。核心入口与框架无关。
 
 ## 分层
 
@@ -149,12 +149,11 @@ npm i local-replica
 
 ### 不需要 store（`local-replica/react`）
 
-适合用 `useEffect` 或直接用 SWR 取数的应用：换掉一个 hook 即可。
+适合用 `useEffect`、SWR 或 React Query 取数的应用：换掉一个 hook 即可。
 
 ```tsx
 import { defineReplica, LocalStorageReplicaStorage } from 'local-replica';
-import { createReplica, createSWRDriver } from 'local-replica/react';
-import useSWR, { mutate } from 'swr';
+import { createReplica } from 'local-replica/react';
 
 const topics = defineReplica({
   name: 'topics',
@@ -164,9 +163,7 @@ const topics = defineReplica({
   storage: (namespace) => new LocalStorageReplicaStorage({ namespace }),
 });
 
-export const { useReplica: useTopics } = createReplica(topics, {
-  driver: createSWRDriver({ mutate, useSWR }),
-});
+export const { useReplica: useTopics } = createReplica(topics);
 
 function TopicList({ agentId }) {
   const { data: topics } = useTopics({ agentId }); // 先是副本，再是服务端的值
@@ -174,7 +171,7 @@ function TopicList({ agentId }) {
 }
 ```
 
-用的是 React Query？把 driver 换成你的 client 即可：`driver: createReactQueryDriver({ queryClient, useQuery })`，其中 `useQuery` 来自 `@tanstack/react-query`。
+这里没有传 driver，内置 driver 会负责调度请求，不需要额外依赖：同一个 key 2 秒内去重，聚焦和恢复网络时重新校验，支持 `refreshInterval` 轮询；它不做失败重试。已经在用 SWR 或 React Query？传入对应的 driver 即可共用你的缓存和配置：`driver: createSWRDriver({ mutate, useSWR })`，或 `driver: createReactQueryDriver({ queryClient, useQuery })`。
 
 `createReplica` 返回的对象上还有 `optimistic`、`remove`、`fetch`、`read(params)` 等 slice 方法。
 

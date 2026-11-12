@@ -10,7 +10,7 @@ order: 3
 npm i local-replica
 ```
 
-`react` and `zustand` are optional peers: `local-replica/react` needs `react`, `local-replica/zustand` needs both. Both bindings schedule requests through a driver: `createSWRDriver` needs `swr`, `createReactQueryDriver` needs `@tanstack/react-query` v5. The core entry is framework-agnostic.
+`react` and `zustand` are optional peers: `local-replica/react` needs `react`, `local-replica/zustand` needs both. Both bindings schedule requests through a driver: the built-in one needs nothing, `createSWRDriver` needs `swr`, `createReactQueryDriver` needs `@tanstack/react-query` v5. The core entry is framework-agnostic.
 
 ## Layers
 

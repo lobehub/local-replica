@@ -36,7 +36,7 @@ export interface UseReplicaResult<TData> extends ReplicaSyncResult {
  */
 export const createReplica = <TParams, TData, TFetched = TData>(
   resource: ReplicaResource<TParams, TData, TFetched>,
-  options: CreateReplicaOptions<TParams, TData, TFetched>,
+  options: CreateReplicaOptions<TParams, TData, TFetched> = {},
 ) => {
   let state: ReplicaOwnStore<TData> = { data: {}, replica: createReplicaState() };
   const listeners = new Set<() => void>();

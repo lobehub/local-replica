@@ -25,6 +25,14 @@ const DESCRIBE: Step = {
   title: 'Describe the data',
 };
 
+const CREATE_HOOK_BUILTIN: Step = {
+  code: `export const { useReplica: useTopics } = createReplica(topics);`,
+  description:
+    'No store and no fetching library to add: a built-in driver dedupes requests and revalidates on focus and reconnect.',
+  language: 'ts',
+  title: 'Create the hook',
+};
+
 const CREATE_HOOK: Step = {
   code: `export const { useReplica: useTopics } = createReplica(topics, {
   driver: createSWRDriver({ mutate, useSWR }), // SWR schedules the requests
@@ -64,7 +72,7 @@ const STACKS: Record<Stack, { label: string; steps: Step[]; today: string; today
     todayNote: 'Fetch on mount, state in the component.',
     steps: [
       DESCRIBE,
-      CREATE_HOOK,
+      CREATE_HOOK_BUILTIN,
       {
         code: `  function TopicList({ agentId }) {
 -   const [topics, setTopics] = useState();

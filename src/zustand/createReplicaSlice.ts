@@ -2,6 +2,7 @@ import { createReplicaEngine } from '../core/engine/createReplicaEngine';
 import { isReplicaSyncKey } from '../core/resource/queryKeys';
 import type { ReplicaResource } from '../core/resource/types';
 import type { ReplicaState } from '../core/state/types';
+import { defaultDriver } from './defaultDriver';
 import { ReplicaScopeChangedError } from './errors';
 import { applyLensWrites } from './lens';
 import {
@@ -30,7 +31,7 @@ import { createUseSync } from './useSync';
 export const createReplicaSlice = <TStore, TParams, TData, TFetched = TData>(
   resource: ReplicaResource<TParams, TData, TFetched>,
   {
-    driver,
+    driver = defaultDriver(),
     effects,
     get,
     set,
