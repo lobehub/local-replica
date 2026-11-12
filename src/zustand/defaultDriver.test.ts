@@ -357,6 +357,24 @@ describe('createDefaultDriver', () => {
       expect(peak).toBe(1);
     });
 
+    it('stops polling when the page unmounts with a polled request in flight', async () => {
+      const slow = deferred<string>();
+      const fetcher = vi
+        .fn()
+        .mockResolvedValueOnce('first')
+        .mockImplementationOnce(() => slow.promise);
+      const { unmount } = mount({ fetcher, options: { dedupingInterval: 0, refreshInterval: 10 } });
+      await waitFor(() => expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(2));
+
+      unmount();
+      await act(async () => {
+        slow.resolve('late');
+      });
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 40)));
+
+      expect(fetcher.mock.calls.length).toBe(2);
+    });
+
     it('keeps polling offline with refreshWhenOffline', async () => {
       const offline = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
       const { fetcher } = mount({

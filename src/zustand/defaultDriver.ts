@@ -248,7 +248,6 @@ export const createDefaultDriver = (): ReplicaSyncDriver => {
           const ms = typeof interval === 'function' ? interval(entry.snapshot.data) : interval;
           if (!ms) return;
           timer = setTimeout(() => {
-            if (stopped) return;
             const allowed =
               (refreshWhenHidden || !isDocumentHidden()) && (refreshWhenOffline || !isOffline());
             // Never overlap the request this key already has in flight (the mount fetch or a
