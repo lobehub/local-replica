@@ -2,6 +2,13 @@
 
 # Changelog
 
+# [0.3.0](https://github.com/lobehub/local-replica/compare/v0.2.0...v0.3.0) (2026-11-12)
+
+
+### ✨ Features
+
+* **zustand**: Add createReactQueryDriver for TanStack Query v5, closes [#14](https://github.com/lobehub/local-replica/issues/14) ([789269e](https://github.com/lobehub/local-replica/commit/789269e))
+
 # [0.2.0](https://github.com/lobehub/local-replica/compare/v0.1.1...v0.2.0) (2026-11-01)
 
 
