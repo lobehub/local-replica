@@ -580,6 +580,10 @@ export const createReactQueryDriver = ({
         if (!result.isFetching && requestStartedAt.current !== 0) requestStartedAt.current = 0;
       });
 
+      // Plain values, unlike `useSync`'s getters: TanStack's tracked properties
+      // already count `isFetching` and `errorUpdatedAt` as read, because the
+      // watches above read them on every render (the request-start window needs
+      // to see each fetch begin). Making these lazy would save no re-render.
       return {
         data: result.data,
         error: result.error ?? undefined,
