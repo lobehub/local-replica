@@ -210,6 +210,9 @@ export const createDefaultDriver = (): ReplicaSyncDriver => {
       const heldKey = useRef<string | null>(null);
       useEffect(() => {
         if (hash === null || entry === null) return;
+        // The hold belongs to the key the hook mounted with: a genuine key change releases
+        // it, so coming back to that key fetches like any other later key.
+        if (heldKey.current !== null && heldKey.current !== hash) heldKey.current = null;
         const current = subscriber.current!;
         current.mounted = true;
         entry.subscribers.add(current);
@@ -234,9 +237,15 @@ export const createDefaultDriver = (): ReplicaSyncDriver => {
         [],
       );
 
-      // Poll while shown. The interval is read on each tick, so it may change per render.
+      // Poll while shown. The interval is read on each tick, so it may change per render; its
+      // value is a dependency too, so a schedule stopped at 0 turns back on when a function
+      // interval starts returning a positive number (a fresh arrow identity would restart
+      // the timer on every render instead).
       const { refreshInterval } = options;
-      const polling = typeof refreshInterval === 'function' ? 'function' : refreshInterval;
+      const polling =
+        typeof refreshInterval === 'function'
+          ? refreshInterval(entry?.snapshot.data as never)
+          : refreshInterval;
       useEffect(() => {
         if (hash === null || entry === null || !polling) return;
         let timer: ReturnType<typeof setTimeout>;
@@ -246,6 +255,10 @@ export const createDefaultDriver = (): ReplicaSyncDriver => {
           const { refreshInterval: interval, refreshWhenHidden, refreshWhenOffline } =
             subscriber.current!.options;
           const ms = typeof interval === 'function' ? interval(entry.snapshot.data) : interval;
+          // A 0 interval stops the loop. The effect covers the option changing (the same
+          // value drives its dependency), so this only guards a function interval that turns
+          // 0 between the render that scheduled this tick and the tick itself.
+          /* v8 ignore next -- unreachable while the option and its dependency agree */
           if (!ms) return;
           timer = setTimeout(() => {
             const allowed =

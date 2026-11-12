@@ -222,6 +222,18 @@ describe('createDefaultDriver', () => {
       await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
     });
 
+    it('releases the mount hold once the hook changes key', async () => {
+      const { fetcher, rerender } = mount({ options: { revalidateOnMount: false } });
+      await act(async () => undefined);
+      expect(fetcher).not.toHaveBeenCalled();
+
+      rerender({ key: ['other'], options: { revalidateOnMount: false } });
+      await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+
+      rerender({ key: ['k'], options: { revalidateOnMount: false } });
+      await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    });
+
     it('keeps the mount hold when React replays the effect in StrictMode', async () => {
       const driver = createDefaultDriver();
       const fetcher = vi.fn(async () => 'value');
@@ -355,6 +367,35 @@ describe('createDefaultDriver', () => {
       // A second tick only happens after the first request settled.
       await waitFor(() => expect(onSuccess.mock.calls.length).toBeGreaterThanOrEqual(2));
       expect(peak).toBe(1);
+    });
+
+    it('restarts polling when a stopped function interval starts returning a number', async () => {
+      let ms = 0;
+      const interval = vi.fn(() => ms);
+      const { fetcher, rerender } = mount({
+        options: { dedupingInterval: 0, refreshInterval: interval },
+      });
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 30)));
+      const stopped = fetcher.mock.calls.length;
+
+      ms = 10;
+      rerender({ key: ['k'], options: { dedupingInterval: 0, refreshInterval: interval } });
+      await waitFor(() => expect(fetcher.mock.calls.length).toBeGreaterThan(stopped));
+    });
+
+    it('stops at 0 when a function interval changes without a re-render', async () => {
+      let ms = 10;
+      const interval = vi.fn(() => ms);
+      const { fetcher } = mount({ options: { dedupingInterval: 0, refreshInterval: interval } });
+      await waitFor(() => expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(2));
+
+      // No re-render: the tick itself reads the new 0 and stops the loop.
+      ms = 0;
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 15)));
+      const stopped = fetcher.mock.calls.length;
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 40)));
+
+      expect(fetcher.mock.calls.length).toBe(stopped);
     });
 
     it('stops polling when the page unmounts with a polled request in flight', async () => {
