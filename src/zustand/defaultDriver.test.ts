@@ -60,8 +60,6 @@ describe('createDefaultDriver', () => {
         version: 1,
       });
       const replica = createReplica(resource);
-      // A second replica without a driver shares the same default one.
-      createReplica({ ...resource, name: 'defaultDriverOther' });
 
       const { result } = renderHook(() => replica.useReplica({ id: 'a' }));
 
@@ -71,6 +69,28 @@ describe('createDefaultDriver', () => {
       await waitFor(() => expect(result.current.data).toEqual(['server']));
       expect(result.current.isValidating).toBe(false);
       await waitFor(() => expect(storage.rows.get('user-1:personal|a')?.data).toEqual(['server']));
+    });
+
+    it('settles every replica of one resource, each in its own store', async () => {
+      const fetcher = vi.fn(async ({ id }: { id: string }) => [`server ${id}`]);
+      // Not persisted: a replica the response skipped would have nothing to show.
+      const resource = defineReplica<{ id: string }, string[]>({
+        fetcher,
+        key: ({ id }) => id,
+        name: 'defaultDriverTwice',
+        scope,
+        version: 1,
+      });
+      const first = createReplica(resource);
+      const second = createReplica(resource);
+
+      const a = renderHook(() => first.useReplica({ id: 'a' }));
+      const b = renderHook(() => second.useReplica({ id: 'a' }));
+
+      await waitFor(() => expect(a.result.current.data).toEqual(['server a']));
+      await waitFor(() => expect(b.result.current.data).toEqual(['server a']));
+      // Each replica asked its own default driver, so neither joined the other's request.
+      expect(fetcher).toHaveBeenCalledTimes(2);
     });
   });
 

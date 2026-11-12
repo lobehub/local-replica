@@ -48,6 +48,12 @@ const ownerOf = (entry: Entry) => entry.subscribers.values().next().value;
 /**
  * The driver `createReplica` and `createReplicaSlice` use when none is passed:
  * a small query cache with no dependency, for apps that fetch with `useEffect`.
+ * Each replica that is not given a driver creates its own.
+ *
+ * One instance may serve replicas of different resources, whose keys never
+ * meet. It must not serve two replicas of the same resource: they would share
+ * a key, dedupe to one request, and only the replica that started it would
+ * settle the response into its store.
  *
  * It follows SWR's model and defaults: requests of a key dedupe within
  * `dedupingInterval` (2s), mounted keys revalidate on focus (throttled by
@@ -294,8 +300,3 @@ export const createDefaultDriver = (): ReplicaSyncDriver => {
     },
   };
 };
-
-let shared: ReplicaSyncDriver | undefined;
-
-/** The driver a replica uses when none is passed, shared by every replica of the app. */
-export const defaultDriver = () => (shared ??= createDefaultDriver());
