@@ -20,7 +20,6 @@ const noop = () => undefined;
 
 /** A mounted `useQuery` as the cache sees it: what to run, and whom to tell. */
 interface Subscriber {
-  fetcher: () => Promise<unknown>;
   /** The last non-null key the hook showed. Like SWR, a hook whose key turned null still hears its request. */
   key: string | null;
   mounted: boolean;
@@ -29,6 +28,14 @@ interface Subscriber {
 
 /** One query key: its last result, the request in flight, the hooks showing it. */
 interface Entry {
+  /**
+   * The fetcher of the latest committed render that showed this key. It lives on
+   * the key, not on a hook: a hook's latest fetcher belongs to whatever key it
+   * shows now, so a request of a key it left (a retained `mutate`, a revalidation
+   * before the key change is committed) would fetch the new key and cache the
+   * response under the old one.
+   */
+  fetcher?: () => Promise<unknown>;
   focusedAt: number;
   hasData: boolean;
   inflight?: Promise<unknown>;
@@ -89,7 +96,7 @@ export const createDefaultDriver = (): ReplicaSyncDriver => {
     for (const listener of entry.listeners) listener();
   };
 
-  /** Run the subscriber's fetcher for the key, or join the request a dedupe window covers. */
+  /** Run the key's fetcher, or join the request a dedupe window covers; report to `subscriber`. */
   const start = (hash: string, entry: Entry, subscriber: Subscriber, dedupe: boolean) => {
     const { dedupingInterval = DEDUPING_INTERVAL, isPaused } = subscriber.options;
     // `isPaused` holds every request, the explicit ones included.
@@ -101,7 +108,10 @@ export const createDefaultDriver = (): ReplicaSyncDriver => {
     const run = ++entry.run;
     entry.startedAt = now;
     const reports = () => subscriber.mounted && subscriber.key === hash;
-    const promise = new Promise<unknown>((resolve) => resolve(subscriber.fetcher())).then(
+    // Set by the layout effect of a render showing the key, which commits before
+    // any request of it can start (mount, poll, focus, `revalidate`, `mutate`).
+    const fetcher = entry.fetcher!;
+    const promise = new Promise<unknown>((resolve) => resolve(fetcher())).then(
       (data) => {
         // A newer request owns the key; this one settles in the replica on its own.
         if (entry.run !== run) return data;
@@ -187,13 +197,14 @@ export const createDefaultDriver = (): ReplicaSyncDriver => {
       const entry = hash === null ? null : entryOf(hash, key!);
 
       const subscriber = useRef<Subscriber>(null);
-      subscriber.current ??= { fetcher, key: hash, mounted: false, options };
-      // The latest render's fetcher and callbacks, like SWR.
+      subscriber.current ??= { key: hash, mounted: false, options };
+      // The latest render's fetcher and callbacks, like SWR; the fetcher goes on the key it fetches.
       useLayoutEffect(() => {
         const current = subscriber.current!;
-        current.fetcher = fetcher;
         current.options = options;
-        if (hash !== null) current.key = hash;
+        if (hash === null) return;
+        current.key = hash;
+        entry!.fetcher = fetcher;
       });
 
       const subscribe = useCallback(

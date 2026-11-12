@@ -284,6 +284,30 @@ describe('createDefaultDriver', () => {
     });
   });
 
+  describe('keys', () => {
+    it('runs the fetcher of the key a retained mutate belongs to', async () => {
+      const driver = createDefaultDriver();
+      const fetcher = vi.fn(async (id: string) => `value ${id}`);
+      const { rerender, result } = renderHook(
+        ({ id }: { id: string }) => driver.useQuery([id], () => fetcher(id), {}),
+        { initialProps: { id: 'a' } },
+      );
+      await waitFor(() => expect(result.current.data).toBe('value a'));
+      const mutateA = result.current.mutate;
+
+      rerender({ id: 'b' });
+      await waitFor(() => expect(result.current.data).toBe('value b'));
+      await act(async () => {
+        await mutateA();
+      });
+
+      // The retained call fetched `a` for `a`, not the fetcher of the key on screen.
+      expect(fetcher).toHaveBeenLastCalledWith('a');
+      rerender({ id: 'a' });
+      expect(result.current.data).toBe('value a');
+    });
+  });
+
   describe('revalidate', () => {
     it('re-runs the mounted keys that match, replacing a request in flight', async () => {
       const driver = createDefaultDriver();
