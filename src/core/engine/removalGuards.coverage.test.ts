@@ -16,6 +16,20 @@ describe('createRemovalGuards', () => {
     expect(guards.removalGeneration('s', 'first')).toBe(2);
     expect(guards.removalGeneration('s', `k${DEFAULT_REMOVAL_TOMBSTONE_LIMIT - 2}`)).toBe(1);
   });
+
+  it('keeps a replay floor for a removal whose watermark was evicted', () => {
+    const guards = createRemovalGuards();
+    guards.markRemoved('s', 'removed');
+    const watermark = guards.removalWatermark('s', 'removed');
+    expect(watermark).toBeGreaterThan(0);
+
+    for (let i = 0; i < DEFAULT_REMOVAL_TOMBSTONE_LIMIT; i++) guards.markRemoved('s', `k${i}`);
+
+    // The stamp went with the entry, but a value cached before the removal must
+    // still be refused a replay: 0 would read as "never removed".
+    expect(guards.removalWatermark('s', 'removed')).toBeGreaterThanOrEqual(watermark);
+    expect(guards.removalWatermark('s', 'never-removed')).toBeGreaterThan(0);
+  });
 });
 
 describe('createEntityRemovalGuards', () => {
