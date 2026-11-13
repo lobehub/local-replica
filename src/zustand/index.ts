@@ -1,4 +1,5 @@
 export * from './createReplicaSlice';
+export { createDefaultDriver } from './defaultDriver';
 export * from './driver';
 export * from './errors';
 export * from './reactQueryDriver';

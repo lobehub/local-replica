@@ -9,8 +9,11 @@ export interface CreateReplicaSliceOptions<TStore, TParams, TData, TFetched> ext
   ReplicaEngineOptions<TParams, TData, TFetched>,
   'port' | 'revalidate'
 > {
-  /** Query cache that schedules fetches (see `createSWRDriver`). */
-  driver: ReplicaSyncDriver;
+  /**
+   * Query cache that schedules fetches: `createSWRDriver`, `createReactQueryDriver`,
+   * or, when left out, the built-in one (see `createDefaultDriver`).
+   */
+  driver?: ReplicaSyncDriver;
   /**
    * Side effects of the resource itself, run by every head response — a
    * mounted `useSync` and an imperative `fetch` alike — after the response is

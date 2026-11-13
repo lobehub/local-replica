@@ -133,7 +133,7 @@ local-replica deliberately does **not** queue writes while offline, merge confli
 npm i local-replica
 ```
 
-`react` and `zustand` are optional peers: `local-replica/react` needs `react`, `local-replica/zustand` needs both. Both bindings schedule requests through a driver: `createSWRDriver` needs `swr`, `createReactQueryDriver` needs `@tanstack/react-query` v5. The core entry is framework-agnostic.
+`react` and `zustand` are optional peers: `local-replica/react` needs `react`, `local-replica/zustand` needs both. Both bindings schedule requests through a driver: the built-in one needs nothing, `createSWRDriver` needs `swr`, `createReactQueryDriver` needs `@tanstack/react-query` v5. The core entry is framework-agnostic.
 
 ## Layers
 
@@ -149,12 +149,11 @@ With `local-replica/react`, the hook returns the data, like `useSWR`, and the re
 
 ### Without a store (`local-replica/react`)
 
-For apps that fetch with `useEffect` or plain SWR: swap one hook.
+For apps that fetch with `useEffect`, SWR or React Query: swap one hook.
 
 ```tsx
 import { defineReplica, LocalStorageReplicaStorage } from 'local-replica';
-import { createReplica, createSWRDriver } from 'local-replica/react';
-import useSWR, { mutate } from 'swr';
+import { createReplica } from 'local-replica/react';
 
 const topics = defineReplica({
   name: 'topics',
@@ -164,9 +163,7 @@ const topics = defineReplica({
   storage: (namespace) => new LocalStorageReplicaStorage({ namespace }),
 });
 
-export const { useReplica: useTopics } = createReplica(topics, {
-  driver: createSWRDriver({ mutate, useSWR }),
-});
+export const { useReplica: useTopics } = createReplica(topics);
 
 function TopicList({ agentId }) {
   const { data: topics } = useTopics({ agentId }); // the replica first, then the server
@@ -174,7 +171,7 @@ function TopicList({ agentId }) {
 }
 ```
 
-Using React Query? Pass your client instead: `driver: createReactQueryDriver({ queryClient, useQuery })`, with `useQuery` from `@tanstack/react-query`.
+No driver is passed, so a built-in one schedules the requests with no extra dependency: it dedupes a key within 2s, revalidates on focus and reconnect, and polls with `refreshInterval`; it does not retry. Already on SWR or React Query? Pass its driver to share your cache and settings: `driver: createSWRDriver({ mutate, useSWR })`, or `driver: createReactQueryDriver({ queryClient, useQuery })`.
 
 The object `createReplica` returns also carries `optimistic`, `remove`, `fetch`, `read(params)` and the other slice methods.
 
