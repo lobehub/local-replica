@@ -74,7 +74,20 @@ export const createReplica = <TParams, TData, TFetched = TData>(
     const key = params ? resource.key(params) : undefined;
     const getSnapshot = () => (key === undefined ? undefined : state.data[key]);
     const data = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-    return { ...sync, data };
+    // Not `{ ...sync, data }`: a spread invokes `useSync`'s lazy `error` /
+    // `isValidating` getters and re-subscribes every caller to them (see
+    // `createUseSync`). Forward them as getters instead.
+    return {
+      data,
+      get error() {
+        return sync.error;
+      },
+      isHydrated: sync.isHydrated,
+      get isValidating() {
+        return sync.isValidating;
+      },
+      revalidate: sync.revalidate,
+    };
   };
 
   return { ...slice, read, subscribe, useReplica };
