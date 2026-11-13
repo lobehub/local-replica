@@ -2,6 +2,13 @@
 
 # Changelog
 
+# [0.4.0](https://github.com/lobehub/local-replica/compare/v0.3.0...v0.4.0) (2026-11-13)
+
+
+### ✨ Features
+
+* **zustand**: Add a built-in driver, so a replica needs no fetching library, closes [#15](https://github.com/lobehub/local-replica/issues/15) ([efb365f](https://github.com/lobehub/local-replica/commit/efb365f))
+
 # [0.3.0](https://github.com/lobehub/local-replica/compare/v0.2.0...v0.3.0) (2026-11-12)
 
 
