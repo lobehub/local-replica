@@ -240,6 +240,26 @@ export const createReplicaEngine = <TParams, TData, TFetched = TData>(
     }
   };
 
+  // Must stay in step with the reducer's `hydrate` case: it answers, before the
+  // row is read, whether that case would drop the row.
+  const holdsEntry = (
+    key: string,
+    query: string | undefined,
+    scope: string,
+    overwrite: boolean,
+  ) => {
+    const slot = getSlot();
+    if (scope !== resource.scope.get() || slot.scope !== scope) return false;
+    const entry = slot.entries[key];
+    if (!entry) return false;
+    if (entry.source === 'seed' && entry.pending.length === 0) return false;
+    return (
+      !overwrite ||
+      entry.query === query ||
+      entry.pending.some((mutation) => mutation.query === undefined)
+    );
+  };
+
   const readAndHydrate = async (
     params: TParams,
     key: string,
@@ -253,6 +273,7 @@ export const createReplicaEngine = <TParams, TData, TFetched = TData>(
     const purge = lastPurge(scope);
     if (purge && !(await purge)) return false;
     const query = resource.query(params);
+    if (holdsEntry(key, query, scope, overwrite)) return false;
     const { queryKey } = storageKey(key, query);
     const writesBefore = rows.writeCount();
     const cached = await storage.get({ queryKey, scope });

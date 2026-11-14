@@ -733,3 +733,101 @@ describe('entity patches of unloaded rows', () => {
     expect(storage.rows.has(`${SCOPE}|b?{}`)).toBe(false);
   });
 });
+
+describe('hydrate reads storage only when the row can paint', () => {
+  const rowReads = (storage: ReturnType<typeof createStorage>) => {
+    const get = vi.spyOn(storage.storage, 'get');
+    return () => get.mock.calls.filter(([key]) => key.queryKey !== REPLICA_INDEX_KEY).length;
+  };
+
+  it('does not read a row again once its entry is hydrated', async () => {
+    resetScope();
+    const storage = createStorage();
+    storage.rows.set(`${SCOPE}|a?{}`, { data: [item('1')], updatedAt: 1 });
+    const { engine, host } = setupList(storage);
+    const reads = rowReads(storage);
+
+    expect(await engine.hydrate({ id: 'a' })).toBe(true);
+    expect(await engine.hydrate({ id: 'a' })).toBe(false);
+
+    expect(reads()).toBe(1);
+    expect(host.view().a).toEqual([item('1')]);
+  });
+
+  it('does not read the row of an entry a server response already filled', async () => {
+    resetScope();
+    const storage = createStorage();
+    storage.rows.set(`${SCOPE}|a?{}`, { data: [item('stale')], updatedAt: 1 });
+    const { engine, host } = setupList(storage);
+    const reads = rowReads(storage);
+    engine.replace({ id: 'a' }, [item('fresh')]);
+
+    expect(await engine.hydrate({ id: 'a' })).toBe(false);
+
+    expect(reads()).toBe(0);
+    expect(host.view().a).toEqual([item('fresh')]);
+  });
+
+  it('still reads the row behind a provisional seed', async () => {
+    resetScope();
+    const storage = createStorage();
+    storage.rows.set(`${SCOPE}|a?{}`, { data: [item('stored')], updatedAt: 1 });
+    const { engine, host } = setupList(storage);
+    const reads = rowReads(storage);
+    engine.update('a', (data) => [...(data ?? []), item('seed')], { source: 'seed' });
+
+    expect(await engine.hydrate({ id: 'a' })).toBe(true);
+
+    expect(reads()).toBe(1);
+    expect(host.view().a).toEqual([item('stored'), item('seed')]);
+  });
+
+  it('still reads another query of a filled entry when asked to overwrite', async () => {
+    resetScope();
+    const storage = createStorage();
+    storage.rows.set(`${SCOPE}|a?{"q":"x"}`, { data: [item('x')], updatedAt: 1 });
+    const { engine, host } = setupList(storage);
+    const reads = rowReads(storage);
+    engine.replace({ id: 'a' }, [item('all')]);
+
+    expect(await engine.hydrate({ id: 'a', q: 'x' }, SCOPE, { overwrite: true })).toBe(true);
+    expect(await engine.hydrate({ id: 'a', q: 'x' }, SCOPE, { overwrite: true })).toBe(false);
+
+    expect(reads()).toBe(1);
+    expect(host.view().a).toEqual([item('x')]);
+  });
+
+  it('does not read under an overlay whose query is unknown, even to overwrite', async () => {
+    resetScope();
+    const storage = createStorage();
+    storage.rows.set(`${SCOPE}|a?{"q":"x"}`, { data: [item('x')], updatedAt: 1 });
+    const { engine, host } = setupList(storage);
+    const reads = rowReads(storage);
+    engine.update('a', () => [item('local')]);
+    const overlay = engine.beginOptimistic('a', (data) => [...data, item('pending')]);
+
+    expect(await engine.hydrate({ id: 'a', q: 'x' }, SCOPE, { overwrite: true })).toBe(false);
+
+    expect(reads()).toBe(0);
+    expect(host.view().a).toEqual([item('local'), item('pending')]);
+    overlay.rollback();
+  });
+
+  it('reads the row again after the entry is cleared', async () => {
+    resetScope();
+    const storage = createStorage();
+    const first = setupList(storage);
+    first.engine.replace({ id: 'a' }, [item('1')]);
+    await flush();
+    const { engine } = setupList(storage);
+    const reads = rowReads(storage);
+    await engine.hydrate({ id: 'a' });
+    scopeState.current = 'u2';
+    engine.ensureScope('u2');
+    scopeState.current = SCOPE;
+
+    expect(await engine.hydrate({ id: 'a' })).toBe(true);
+    expect(reads()).toBe(2);
+    resetScope();
+  });
+});
