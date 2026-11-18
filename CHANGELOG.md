@@ -2,6 +2,13 @@
 
 # Changelog
 
+## [0.4.1](https://github.com/lobehub/local-replica/compare/v0.4.0...v0.4.1) (2026-11-18)
+
+
+### 🐛 Bug Fixes
+
+* **zustand**: Subscribe useSync callers to isValidating / error only when read, closes [#16](https://github.com/lobehub/local-replica/issues/16) ([de486f2](https://github.com/lobehub/local-replica/commit/de486f2))
+
 # [0.4.0](https://github.com/lobehub/local-replica/compare/v0.3.0...v0.4.0) (2026-11-13)
 
 
