@@ -212,8 +212,16 @@ export const createUseSync = <TStore, TParams, TData, TFetched>({
       },
     );
 
+    // `error` and `isValidating` are getters, not values copied into a literal:
+    // SWR (and TanStack Query's tracked properties) re-render a caller only for
+    // the result fields it read. Copying them reads both on every render, which
+    // subscribes every caller to each background revalidation's true → false
+    // flip even when it never shows a spinner. Keep them lazy, and do not spread
+    // this object (a spread invokes the getters).
     return {
-      error: sync.error,
+      get error() {
+        return sync.error;
+      },
       // A read with no key has nothing to hydrate, so it counts as hydrated: a
       // conditional consumer must not show "loading" for an absent id (the
       // former SWR disabled-key behaviour). A read that is disabled but *has* a
@@ -223,7 +231,9 @@ export const createUseSync = <TStore, TParams, TData, TFetched>({
         !resource.persisted ||
         !resource.persistKey(key) ||
         hydration.data === true,
-      isValidating: sync.isValidating,
+      get isValidating() {
+        return sync.isValidating;
+      },
       revalidate: () => sync.mutate(),
     };
   };
